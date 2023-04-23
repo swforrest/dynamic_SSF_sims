@@ -1,0 +1,904 @@
+---
+title: "BCRW_simulations"
+author: "Scott Forrest"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load packages 
+
+```{r packages} 
+# , message=F, warning=F
+
+library(tidyverse)
+packages <- c("amt", "lubridate", "terra", "tictoc", "RColorBrewer", "patchwork", 
+              "sf", "ggpubr","Rfast", "beepr", "SpatialKDE", "ks", "circular")
+walk(packages, require, character.only = T)
+
+```
+
+
+Import buffalo telemetry data.
+
+```{r message = FALSE}
+
+# buffalo_CLR <- read_csv(file = "outputs/buffalo_parametric_indv_covs_20230208.csv")
+# using the population estimate as the TENTATIVE distribution will make it easier to estimate the weighted mean estimate of the movement kernel
+buffalo_data <- read_csv(file = "outputs/buffalo_parametric_popn_covs_20230208.csv")
+
+unique(buffalo_data$id)
+
+# scaling_mean <- mean(values(ndvi_projected[[7]], na.rm = TRUE)) # 0.4054526 for July 2018
+# scaling_sd <- sd(values(ndvi_projected[[7]], na.rm = TRUE)) # 0.1113644 for July 2018
+
+buffalo_CLR <- buffalo_data %>% 
+  mutate(id_num = as.numeric(factor(id)), 
+         step_id = step_id_, 
+         x1 = x1_, x2 = x2_, 
+         y1 = y1_, y2 = y2_, 
+         t1 = t1_, t1_rounded = round_date(buffalo_data$t1_, "hour"), t2 = t2_, 
+         sl = sl_, log_sl = log_sl_, 
+         ta = ta_, cos_ta = cos_ta_,
+         year = year(t1_), 
+         month = month(t1_), 
+         # month_factor = factor(month(t1_)),
+         hour = hour(t1_),
+         # hour_factor = factor(hour),
+         # day = day(t1_),
+         # day_factor = factor(day(t1_)),
+         # step_id_factor = factor(step_id_),
+         ndvi_scaled = ((ndvi_temporal - 0.4054526) / 0.1113644),
+         canopy_01 = canopy_cover/100,
+         herby_scaled = scale(veg_herby),
+         canopy_scaled = scale(canopy_01),
+         elev_scaled = scale(DEM_H_end),
+         elev_delta_scaled = scale(elev_delta),
+         elev_log_scaled = scale(elev_log),
+         slope_scaled = scale(slope_end),
+         month_s1 = sin(2*pi*month/12),
+         month_s2 = sin(4*pi*month/12),
+         month_c1 = cos(2*pi*month/12),
+         month_c2 = cos(4*pi*month/12)) %>%
+  drop_na(c(ndvi_temporal, veg_herby, canopy_01, sl_)) %>% 
+  dplyr::select(!(burst_:case_))
+
+```
+
+Determining how many individuals have at least 1 year of data
+
+```{r}
+
+# buffalo_CLR %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
+#   geom_point(alpha = 0.1) +
+#   scale_y_discrete("Buffalo ID") +
+#   scale_x_datetime("Date") +
+#   scale_colour_viridis_d() +
+#   theme_bw() +
+#   theme(legend.position = "none")
+# 
+# buffalo_CLR %>% dplyr::group_by(id) %>%  
+#   summarise(min_time = min(t1), max_time = max(t1),
+#             min_x = min(x2), max_x = max(x2),
+#             min_y = min(y2), max_y = max(y2))
+
+```
+
+
+Filtering by animals that have more than a year of data
+
+```{r}
+
+# these individuals have more than 1 year of data (or very close to)
+buffalo_year_ids <- c(2005, 2014, 2018, 2022, 2024, 2154, 2158, 2327, 2354, 2387)
+buffalo_CLR_year <- buffalo_CLR %>% filter(id %in% buffalo_year_ids)
+buffalo_CLR_year_pres <- buffalo_CLR_year %>% filter(y == 1) %>% dplyr::select(c(id, y, x1, x1, y1, y2, t1, month, hour))
+
+# write_csv(buffalo_CLR_year %>% dplyr::select(c(id, y, x1, x1, y1, y2, t1, month)), "outputs/buffalo_CLR_year_locations_20230220.csv")
+
+buffalo_CLR_year <- read_csv("outputs/buffalo_CLR_year_locations_20230220.csv")
+
+```
+
+
+Setting up before the simulation
+- resource layers
+- coefficient values
+- random starting locations
+
+```{r}
+
+# monthly_coefs <- read_csv("outputs/buffalo_parametric_indv_movement_params_20230208.csv")
+monthly_coefs <- read_csv("outputs/monthly_CLR_coefs_wide_with_movement_params_20230210.csv") # this is for the weighted mean
+monthly_coefs$date <- with_tz(monthly_coefs$date, tzone = "Australia/Queensland")
+
+```
+
+
+Resources
+
+```{r}
+
+ndvi_above0_stack_scaled <- rast("mapping/cropped rasters/ndvi_above0_stack_scaled_20230210.tif")
+slope_scaled <- rast("mapping/cropped rasters/slope_scaled_by_buffalo_data_20230210.tif")
+veg_herby <- rast("mapping/cropped rasters/veg_herby.tif")
+canopy_scaled <- rast("mapping/cropped rasters/canopy_scaled_by_buffalo_data_20230210.tif")
+
+```
+
+
+Generate habitat surfaces to sample from (i.e. the naive approach)
+
+```{r temporal naive}
+
+# create date vector
+years <- c(rep(2019, 7), rep(2018, 5))
+months <- c(seq(1, 7, 1), seq(8, 12, 1))
+day <- rep(1, 12)
+dates <- make_datetime(year = years, month = months, day = day, tz = "Australia/Queensland")
+
+# set up loop
+layers_naive <- c()
+
+for(i in 1:12) {
+  
+  # i = 1
+
+resources <- c(ndvi_above0_stack_scaled[[which(time(ndvi_above0_stack_scaled) == monthly_coefs$date[i])]], 
+               slope_scaled,
+               veg_herby, 
+               canopy_scaled)
+
+# plot(resources)
+# extent(resources) <- c(0, 60000, 0, 57000)
+
+naive <- rast(resources)[[1]]
+naive <- terra::setValues(naive, 0)
+names(naive) <- "naive_predictions"
+  
+for (j in 1:4) {
+  naive <- naive + monthly_coefs[i,][[j + 1]] * resources[[j]]
+}
+  
+naive_norm <- exp(naive)/global(exp(naive), fun = "sum", na.rm = TRUE)[[1]]
+# terra::plot(naive_norm)
+layers_naive <- c(layers_naive, naive_norm)
+
+}
+
+naive_predictions <- rast(layers_naive)
+plot(naive_predictions[[1]])
+points(buffalo_CLR_year_pres$x1, buffalo_CLR_year_pres$y1)
+
+# layers <- mask(layers, water, maskvalue = 1)
+# raster::plot(layers, col = brewer.pal(9, "Reds"), main = dates)
+
+terra::time(naive_predictions) <- dates
+terra::time(naive_predictions) 
+
+# for(i in 1:12) (plot(naive_predictions[[i]], main = time(naive_predictions[[i]])))
+
+# writeRaster(naive_predictions, "mapping/pred_outputs/naive/naive_20230223/naive_stack_20230223.tif")
+naive_predictions <- rast("mapping/pred_outputs/naive/naive_20230223/naive_stack_20230223.tif")
+
+```
+
+
+```{r}
+
+n_indvs <- 1000 # number of individual 'animals'
+n_steps <- 100 # number of steps in the trajectory
+n_ch <- 100 # number of steps to be selected from
+
+month_n <- 1
+
+```
+
+
+Select the appropriate probability surface for the month of interest, and possibly crop to a smaller extent.
+
+```{r}
+
+# resources <- c(ndvi_above0_stack_scaled[[which(time(ndvi_above0_stack_scaled) == monthly_coefs$date[month_n])]],
+#                slope_scaled,
+#                veg_herby, 
+#                canopy_scaled)
+
+# ext(resources) <- c(0, 60000, 0, 57000)
+# plot(resources[[1]])
+habitat_selection <- naive_predictions[[which(time(naive_predictions) == monthly_coefs$date[month_n])]]
+plot(habitat_selection)
+# nrow(resources) * ncol(resources)
+ext(habitat_selection) # 0, 60000, -1463000, -1406000
+
+# smaller 100 x 100 extent
+xmin <- 30000
+xmax <- 32500
+ymin <- -1436000
+ymax <- -1433500
+
+# larger extent
+xmin <- 12500
+xmax <- 45000
+ymin <- -1445000
+ymax <- -1427500
+
+crop_extent <- ext(xmin, xmax, ymin, ymax)
+
+resources_cropped <- terra::crop(habitat_selection, crop_extent)
+ext(resources_cropped) <- c(xmin - xmin, 
+                            xmax - xmin, 
+                            ymin - ymin, 
+                            ymax - ymin)
+
+terra::plot(resources_cropped)
+terra::plot(resources_cropped)
+points(buffalo_CLR_year$x1 - xmin, buffalo_CLR_year$y1 - ymin)
+nrow(resources_cropped) * ncol(resources_cropped)
+
+# resources_cropped_raster <- raster(resources_cropped)
+
+```
+
+Cropping all layers
+
+```{r}
+
+# naive_predictions
+# 
+# habitat_selection <- naive_predictions[[which(time(naive_predictions) == monthly_coefs$date[month_n])]]
+# plot(habitat_selection)
+# # nrow(resources) * ncol(resources)
+
+naive_predictions_cropped <- terra::crop(naive_predictions, crop_extent)
+
+ext(naive_predictions_cropped) <- c(xmin - xmin, 
+                                    xmax - xmin, 
+                                    ymin - ymin, 
+                                    ymax - ymin)
+
+terra::plot(naive_predictions_cropped[[1]])
+points(buffalo_CLR_year_pres$x1, buffalo_CLR_year_pres$y1)
+# writeRaster(naive_predictions_cropped, "outputs/simulated trajectories/prediction_maps/naive_predictions_cropped_20230222.tif")
+
+resources_cropped <- naive_predictions_cropped[[month_n]]
+
+# naive_raster_cropped <- raster::stack(naive_predictions_cropped)
+# plot(naive_raster_cropped)
+
+```
+
+
+
+# Global parameters for the simulation model
+
+```{r}
+
+# selecting coef values for that month
+coef_values <- monthly_coefs[month_n,][2:5]
+coef_values
+
+```
+
+
+Setup starting locations
+
+```{r}
+
+start_locs <- buffalo_CLR_year %>% filter(y == 1 & month == 1 & id == 2154) %>% mutate(xadj = x1 - xmin, yadj = y1 - ymin) %>% slice(1) %>% select(c(xadj, yadj)) %>% data.frame()
+
+start_init <- cbind(rep(start_locs[[1]], n_indvs), rep(start_locs[[2]], n_indvs))
+
+start_unif <- cbind(runif(n_indvs, min = ext(resources_cropped)[1], max = ext(resources_cropped)[2]), 
+                    runif(n_indvs, min = ext(resources_cropped)[3], max = ext(resources_cropped)[4]))
+
+```
+
+
+BCRW function - parametric step lengths
+
+```{r}
+
+# for testing function - comment out otherwise
+# coef <- coef_values
+# xy0 <- start_unif
+# resc <- resources_cropped
+
+simulate_ssf <- function(n_steps, n_ch, coef, xy0, resc) { 
+  
+  sl <- rgamma(n_steps * n_ch, shape = monthly_coefs$shape[month_n], scale = monthly_coefs$scale[month_n])
+  ta <- as.numeric(Rfast::rvonmises(n_steps * n_ch, m = pi, k = monthly_coefs$kappa[month_n]) - pi)
+  # hist(sl)
+  # hist(ta)
+  steps <- rep(1:n_steps, each = n_ch)
+  x_0 <- xy0[1]
+  y_0 <- xy0[2]
+  x_s <- sl * sin(ta)
+  y_s <- sl * cos(ta)
+  x <- rep(NA, n_steps)
+  y <- rep(NA, n_steps)
+  x[1] <- x_0
+  y[1] <- y_0
+  # multiply resources with selection coef
+  # for (i in 1:length(coef)) resc[[i]] <- resc[[i]] * coef[i][[1]]
+  
+  # for testing function - comment out otherwise
+  # plot(resc)
+  # i = 2
+  
+  for (i in 2:n_steps) {
+    # adding the modulo operator %% ensures a wrapped/toroid landscape, but the origin must be at (0,0)
+    x_pos <- (x[i - 1] + sl[steps == i] * sin(ta[steps == i])) %% ext(resc)[2] 
+    y_pos <- (y[i - 1] + sl[steps == i] * cos(ta[steps == i])) %% ext(resc)[4]
+    # plot(resc)
+    # plot(resources[[1]])
+    # points(x = x_pos, y = y_pos)
+    
+    # sampling environment
+    # p <- exp(rowSums(terra::extract(resc, cbind(x_pos, y_pos))))
+    
+    p <- terra::extract(resc, cbind(x_pos, y_pos))[,1]
+    
+    p[is.na(p)] <- 1e-10
+    w <- sample(n_ch, 1, prob = p)
+    # w <- which.max(p) # causes it to get stuck in local maxima
+    x[i] <- x_pos[w]
+    y[i] <- y_pos[w]
+  }
+  
+  
+  # step_extract <- function(i, x, y, sl, ta, steps, resc) {
+  # 
+  #   x_pos <- (x[i - 1] + sl[steps == i] * sin(ta[steps == i])) %% ext(resc)[2]
+  #   y_pos <- (y[i - 1] + sl[steps == i] * cos(ta[steps == i])) %% ext(resc)[4]
+  # 
+  #   p <- terra::extract(resc, cbind(x_pos, y_pos))[,1]
+  # 
+  #   p[is.na(p)] <- 1e-10
+  #   w <- sample(n_ch, 1, prob = p)
+  #   # w <- which.max(p) # causes it to get stuck in local maxima
+  #   x[i] <- x_pos[w]
+  #   y[i] <- y_pos[w]
+  #   
+  #   return(x)
+  # 
+  # }
+  # 
+  #  step_extract(i = 2:5, x = x, y = y, sl = sl, ta = ta, steps = steps, resc = resc)
+  # 
+  # map_dbl(2:n_steps, step_extract(i = , x = x, y = y, sl = sl, ta = ta, steps = steps, resc = resc))
+  # 
+  # 
+  # # attempting to map rather than loop
+  # map_dbl(2:n_steps, function(i, x = x, y = y, sl = sl, ta = ta, steps = steps, resc = resc) {
+  # 
+  #   x_pos <- (x[i - 1] + sl[steps == i] * sin(ta[steps == i])) %% ext(resc)[2]
+  #   y_pos <- (y[i - 1] + sl[steps == i] * cos(ta[steps == i])) %% ext(resc)[4]
+  # 
+  #   p <- terra::extract(resc, cbind(x_pos, y_pos))[,1]
+  # 
+  #   p[is.na(p)] <- 1e-10
+  #   w <- sample(n_ch, 1, prob = p)
+  #   # w <- which.max(p) # causes it to get stuck in local maxima
+  #   x[i] <- x_pos[w]
+  #   y[i] <- y_pos[w]
+  # 
+  # })
+  
+  
+  data_frame(x = x, y = y)
+}
+
+```
+
+
+Running the function
+
+```{r}
+
+tic()
+stps <- map(1:n_indvs, function(i)
+  
+  simulate_ssf(n_steps = n_steps, 
+               n_ch = n_ch, 
+               coef = coef_values, 
+               xy0 = start_unif[i,], 
+               resc = resources_cropped)
+  )
+toc()
+
+beep(sound = 2)
+
+```
+
+
+Near term predictions (the same starting location)
+
+```{r}
+
+tic()
+stps <- map(1:n_indvs, function(i)
+  
+  simulate_ssf(n_steps = n_steps, 
+               n_ch = n_ch, 
+               coef = coef_values, 
+               xy0 = start_init[i,], 
+               resc = resources_cropped)
+  )
+toc()
+
+beep(sound = 2)
+
+```
+
+
+
+Generating a dataframe from the list elements (of each individual's trajectory)
+
+```{r}
+
+animals <- data_frame(
+  id = paste0("a", 1:n_indvs),
+  track = map(stps, ~ track(x = .$x, y = .$y, t = ymd_hm("2019-01-01 00:00") + hours(1:nrow(.))))
+)
+
+sim_data <- unnest(animals, cols = track)
+
+write_csv(sim_data, paste("outputs/simulated trajectories/bcrw_buffalo_w_mean_croppedresc_month", month_n,
+                          "_", n_indvs, "indvs_", n_ch, "ch_", n_steps, "stps_", Sys.Date(), ".csv", sep = ""))
+
+```
+
+
+# Looping over months
+
+```{r}
+
+# crop_extent <- ext(00000, 50000, -1450000, -1410000)
+
+sim_data_list <- vector(mode = "list", length = 12)
+
+tic()
+for(j in 1:12) {
+  
+  month_n <- j
+  resources <- naive_predictions_cropped[[j]]
+
+### setting up starting locations
+start_unif <- cbind(runif(n_indvs, min = ext(resources)[1], max = ext(resources)[2]), 
+                    runif(n_indvs, min = ext(resources)[3], max = ext(resources)[4]))
+
+### running the function
+stps <- map(1:n_indvs, function(i)
+  
+  simulate_ssf(n_steps = n_steps, 
+               n_ch = n_ch, 
+               coef = monthly_coefs[i,][2:5], 
+               xy0 = start_unif[i,], 
+               resc = resources)
+  )
+
+### turning into track object
+animals <- data_frame(
+  id = paste0("a", 1:n_indvs),
+  track = map(stps, ~ track(x = .$x, y = .$y, t = ymd_hm("2019-01-01 00:00") + hours(1:nrow(.))))
+)
+
+### expanding into data frame and saving to csv
+sim_data_list[[j]] <- unnest(animals, cols = track)
+write_csv(sim_data_list[[j]], paste("outputs/simulated trajectories/bcrw_buffalo_w_mean_loop_month", month_n,
+                          "_", n_indvs, "indvs_", n_ch, "ch_", n_steps, "stps_", Sys.Date(), ".csv", sep = ""))
+
+}
+toc()
+
+```
+
+
+# Looping over the same month but saving intermittently
+
+```{r}
+
+ext(naive_predictions_cropped) <- c(xmin - xmin, 
+                                    xmax - xmin, 
+                                    ymin - ymin, 
+                                    ymax - ymin)
+
+nrow(naive_predictions_cropped) * ncol(naive_predictions_cropped)
+
+n_indvs <- 100
+n_steps <- 1e3
+n_ch <- 100
+month_n <- 3
+
+sim_data_list <- vector(mode = "list", length = 100)
+
+for(j in 1:100) {
+  
+  # month_n <- j
+  resources <- naive_predictions_cropped[[month_n]] # always the same month
+
+### setting up starting locations
+start_unif <- cbind(runif(n_indvs, min = ext(resources)[1], max = ext(resources)[2]), 
+                    runif(n_indvs, min = ext(resources)[3], max = ext(resources)[4]))
+
+### running the function
+tic()
+stps <- map(1:n_indvs, function(i)
+  
+  simulate_ssf(n_steps = n_steps, 
+               n_ch = n_ch, 
+               coef = monthly_coefs[month_n,][2:5], 
+               xy0 = start_unif[i,], 
+               resc = resources)
+  )
+toc()
+
+### turning into track object
+animals <- data_frame(
+  id = paste0("a", 1:n_indvs),
+  track = map(stps, ~ track(x = .$x, y = .$y, t = ymd_hm("2019-01-01 00:00") + hours(1:nrow(.))))
+)
+
+### expanding into data frame and saving to csv
+sim_data_list[[j]] <- unnest(animals, cols = track)
+write_csv(sim_data_list[[j]], paste("outputs/simulated trajectories/bcrw_buffalo_w_mean_lge_ext_month_run",j , "month_3", month_n,
+                          "_", n_indvs, "indvs_", n_ch, "ch_", n_steps, "stps_", Sys.Date(), ".csv", sep = ""))
+
+}
+
+```
+
+
+Plotting the simulated data
+
+```{r}
+
+sim_data <- sim_data_list[[1]]
+
+coef_values
+plot(resources)
+plot(resources[[1]])
+plot(resources_cropped)
+plot(resources_cropped)
+points(x = sim_data$x_, y = sim_data$y_)
+
+naive_cropped_df <- as.data.frame(resources_cropped, xy = TRUE)
+
+ggplot() +
+  geom_raster(data = naive_cropped_df, aes(x = x, y = y, fill = naive_predictions)) +
+  #geom_path(data = sim_data, aes(x = x_, y = y_, colour = id), size = 1) +
+  geom_point(data = sim_data, aes(x = x_, y = y_), size = 0.1, colour = "black", alpha = 0.5) + # colour = id
+  # geom_point(data = buffalo_subset %>% filter(y == 1), aes(x = x1_, y = y1_ + 1463000), size = 0.1, colour = "red") +
+  scale_fill_viridis_c("Habitat suitability (naive)") +
+  scale_colour_discrete(guide = "none") +
+  #scale_fill_gradient(low = "white", high = "darkgreen") +
+  coord_equal() +
+  ggtitle("10 steps ahead (n = 1000)") +
+  theme_bw() +
+  theme(legend.position = "right", legend.key.width = unit(1.1, "cm"))
+
+# ggsave("outputs/plots/bcrw_simulations/bcrw_short_term_preds_20230301.png",
+# width=150, height=90, units="mm", dpi = 300)
+# ggsave("outputs/plots/bcrw_simulations/bcrw_short_term_preds_pres_20230301.png",
+# width=300, height=180, units="mm", dpi = 300, scale = 1)
+
+
+bcrw_extent <- sim_data %>% filter(id == "a1") %>% 
+  summarise(min_x = min(x_), max_x = max(x_),
+            min_y = min(y_), max_y = max(y_),
+            x_range = max(x_) - min(x_),
+            y_range = max(y_) - min(y_))
+
+ggplot() +
+  geom_raster(data = naive_cropped_df, aes(x = x, y = y, fill = NDVI)) +
+  geom_path(data = sim_data, aes(x = x_, y = y_, colour = id), linewidth = 0.5) +
+  geom_point(data = sim_data, aes(x = x_, y = y_, colour = id), size = 0.5, alpha = 0.1) + # colour = "black", 
+  # geom_point(data = buffalo_subset %>% filter(y == 1), aes(x = x1_, y = y1_ + 1463000), size = 0.1, colour = "red") +
+  scale_fill_viridis_c() +
+  scale_colour_discrete(guide = FALSE) +
+  #scale_fill_gradient(low = "white", high = "darkgreen") +
+  scale_x_continuous(limits = c(bcrw_extent$min_x - 1000, bcrw_extent$max_x + 1000)) +
+  scale_y_continuous(limits = c(bcrw_extent$min_y - 1000, bcrw_extent$max_y + 1000)) +
+  coord_equal() +
+  ggtitle("Simulation Approach") +
+  theme_bw() +
+  theme(legend.position = "bottom", legend.key.width = unit(1.1, "cm"))
+
+```
+
+
+## generating distribution map
+
+```{r}
+
+points <- resources_cropped #resource[[1]]
+points[] <- 0
+
+sim_ud_points <- as.matrix(sim_data[,2:3])
+counts <- as.data.frame(table(terra::cellFromXY(resources_cropped, sim_ud_points))) # resources[[1]]
+points[as.numeric(levels(counts$Var1))] <- counts$Freq
+
+plot(points)
+# plot(points)
+# points(x = sim_data$x, y = sim_data$y)  
+plot(resources_cropped)
+
+
+
+ggplot() +
+  geom_raster(data = naive_df, aes(x = x, y = y, fill = naive_predictions)) +
+  #geom_path(data = sim_data, aes(x = x_, y = y_, colour = id), size = 1) +
+  # geom_point(data = sim_data, aes(x = x_, y = y_), size = 1, colour = "black", alpha = 0.05) + # colour = id
+  # geom_point(data = buffalo_subset %>% filter(y == 1), aes(x = x1_, y = y1_ + 1463000), size = 0.1, colour = "red") +
+  scale_fill_viridis_c() +
+  # scale_colour_discrete(guide = FALSE) +
+  #scale_fill_gradient(low = "white", high = "darkgreen") +
+  coord_equal() +
+  ggtitle("Naive Approach") +
+  theme_bw()
+
+```
+
+
+# Kernel density estimation
+
+```{r}
+
+sim_m1_100indvs_10ch_10000stps <- read_csv("outputs/simulated trajectories/bcrw_buffalo_w_mean_100indvs_10000stps_2023-02-10.csv")
+plot(sim_m1_100indvs_10ch_10000stps$x_, sim_m1_100indvs_10ch_10000stps$y_)
+
+sim_data <- sim_m1_100indvs_10ch_10000stps
+
+sim_data %>% filter(id == unique(sim_data$id)[1:10])
+
+sim_data_sf <- sim_data %>% # %>% filter(id == unique(sim_data$id)[1:10]) 
+  st_as_sf(coords = c("x_", "y_"), dim = "XY") %>%
+  st_set_crs(3112) %>%
+  select()
+
+cell_size <- 25
+band_width <- 50
+
+sim_data_raster <- sim_data_sf %>%
+  create_raster(cell_size = cell_size, side_offset = band_width)
+
+tic()
+sim_data_kde <- sim_data_sf %>%
+  SpatialKDE::kde(band_width = band_width, kernel = "triweight", grid = sim_data_raster)
+toc()
+
+beep(sound = 2)
+
+plot(rast(sim_data_kde))
+sim_data_kde_trim <- crop(rast(sim_data_kde), ext(resources_cropped))
+plot(sim_data_kde_trim)
+
+# normalise to sum to 1
+sim_data_kde_trim_norm <- sim_data_kde_trim / global(sim_data_kde_trim, fun = "sum", na.rm = TRUE)[[1]]
+global(sim_data_kde_trim_norm, fun = "sum", na.rm = TRUE)
+
+resources_cropped_norm <- resources_cropped / global(resources_cropped, fun = "sum", na.rm = TRUE)[[1]]
+global(resources_cropped_norm, fun = "sum", na.rm = TRUE)
+
+points_norm <- points / global(points, fun = "sum", na.rm = TRUE)[[1]]
+global(points_norm, fun = "sum", na.rm = TRUE)[[1]]
+
+plot(resources_cropped_norm)
+plot(points_norm)
+plot(sim_data_kde_trim_norm)
+
+```
+
+
+```{r}
+
+# ext(resources_cropped_norm) <- ext(30000, 32000, -1436000, -1434000)
+# ext(points_norm) <- ext(30000, 32000, -1436000, -1434000)
+# ext(sim_data_kde_trim_norm) <- ext(30000, 32000, -1436000, -1434000)
+
+# naive_cropped_df <- as.data.frame(resources_cropped_norm, xy = TRUE)
+# naive_predictions_cropped_df <- as.data.frame(naive_predictions_cropped, xy = TRUE)
+# month(with_tz(time(naive_predictions_cropped), tzone = "Australia/Queensland"))
+ext(resources_cropped) <- c(xmin - xmin, xmax - xmin, ymin - ymin, ymax - ymin)
+naive_cropped_df <- as.data.frame(resources_cropped, xy = TRUE)
+
+
+# points_df <- as.data.frame(points_norm, xy = TRUE)
+# sim_data_kde_df <- as.data.frame(sim_data_kde_trim_norm, xy = TRUE)
+
+naive_cropped_df
+points_df
+sim_data_kde_df
+
+### NAIVE ###
+
+ggplot() +
+  geom_raster(data = naive_cropped_df, aes(x = x, y = y, fill = naive_predictions)) +
+  geom_point(data = buffalo_CLR_year %>% filter(y == 1 & month == 1 & id == 2154), 
+             aes(x = x1 - xmin, y = y1 - ymin, colour = factor(id))) +
+             # ,
+             # colour = "red") +
+  coord_equal() +
+  scale_x_continuous(limits = c(0, xmax - xmin)) +
+  scale_y_continuous(limits = c(0, ymax - ymin)) +
+  scale_fill_viridis_c("Naive predictions", option = "D") +
+  theme_classic() +
+  theme(legend.position = "right")
+
+ggsave("outputs/plots/bcrw_simulations/naive_cropped_wpoints_20230217png", width=150, height=90, units="mm", dpi = 300)
+
+for(i in 1:12) print(ggplot() +
+  geom_raster(data = as.data.frame(naive_predictions_cropped_df[,c(1,2,2+i)]), 
+              aes(x = x, y = y, fill = !!sym(colnames(as.data.frame(naive_predictions_cropped_df[2+i]))))) +
+    scale_fill_viridis_c(option = "D") +
+  geom_point(data = buffalo_CLR_year %>% filter(y == 1 & month == i), aes(x = x1, y = y1, colour = factor(id))) +
+  coord_equal() +
+  scale_x_continuous(limits = c(20000, 40000)) +
+  scale_y_continuous(limits = c(-1440000, -1430000)) +
+  theme_classic())
+
+
+### RAW BCRW POINTS ###
+
+ggplot() +
+  geom_raster(data = points_df, aes(x = x, y = y, fill = naive_predictions)) +
+  geom_point(data = buffalo_CLR_year %>% filter(y == 1 & month == 1), aes(x = x1, y = y1)) +
+  coord_equal() +
+  scale_x_continuous(limits = c(30000, 32000)) +
+  scale_y_continuous(limits = c(-1436000, -1434000)) +
+  scale_fill_viridis_c(option = "D") +
+  theme_classic()
+
+
+### KDE BCRW POINTS ###
+
+ggplot() +
+  geom_raster(data = sim_data_kde_df, aes(x = x, y = y, fill = layer)) +
+  geom_path(data = buffalo_CLR_year %>% filter(y == 1 & month == 1), aes(x = x1, y = y1, colour = factor(id))) +
+  coord_equal() +
+  scale_x_continuous(limits = c(30000, 32000)) +
+  scale_y_continuous(limits = c(-1436000, -1434000)) +
+  scale_fill_viridis_c(option = "D") +
+  theme_classic()
+
+for(i in 1:12) print(ggplot() +
+  geom_raster(data = sim_data_kde_df, aes(x = x, y = y, fill = layer)) +
+  geom_path(data = buffalo_CLR_year %>% filter(y == 1 & month == i), aes(x = x1, y = y1, colour = factor(id))) +
+  coord_equal() +
+  scale_x_continuous(limits = c(30000, 32000)) +
+  scale_y_continuous(limits = c(-1436000, -1434000)) +
+  scale_fill_viridis_c(option = "D") +
+  theme_classic())
+
+```
+
+
+
+## Determining an appropriate extent
+
+```{r}
+
+naive_df <- as.data.frame(naive_predictions[[1]], xy = TRUE)
+min(naive_df$y, na.rm = TRUE)
+
+ggplot() +
+  geom_raster(data = naive_df, 
+              aes(x = x, y = y + 1462963, fill = naive_df[,3])) +
+  scale_fill_viridis_c("Habitat suitability", direction = 1, 
+                       option = "D") + 
+    geom_point(data = buffalo_CLR_year %>% filter(month == 1 & y == 1), 
+               aes(x = x1, y = y1 + 1462963, colour = factor(id)), size = 1, alpha = 0.75) + # colour = "red", 
+  coord_equal() +
+  scale_x_continuous(limits = c(30000, 35000)) +
+  scale_y_continuous(limits = c(25000, 30000)) +
+  # ggtitle(paste("Naive approach", time(naive_predictions_01[[i]]), sep = " ")) +
+  theme_bw() +
+  theme(legend.position = "right", legend.key.width = unit(1, "cm"))
+
+ggplot()
+
+```
+
+
+
+
+
+
+
+```{r}
+
+points_ud <- points / cellStats(points, stat = "sum")
+cellStats(points_ud, stat = "sum")
+points_df <- as.data.frame(points_ud, xy = TRUE)
+points_df$layer <- points_df$ndvi
+
+bcrw <- 
+  ggplot() +
+  geom_raster(data = points_df, aes(x = x, y = y, fill = layer)) +
+  #geom_point(data = animals_ssf %>% filter(case_ == TRUE), aes(x = x1_, y = y1_, colour = id), size = 0.5) +
+  #scale_fill_viridis_c() +
+  scale_fill_gradient(low = "white", high = "red") +
+  coord_equal() +
+  ggtitle("Simulation Approach") +
+  theme_bw() +
+  theme(legend.position = "bottom", legend.key.width = unit(1.1, "cm"))
+
+bcrw
+
+```
+
+
+
+
+
+
+
+
+
+# Currently unused
+
+BCRW function - empirical movement kernel (bootstrapping data)
+
+```{r}
+
+# empirical_steps <- buffalo_all_covs %>% filter(y == 1) %>% .$sl_ 
+# empirical_angles <- buffalo_all_covs %>% filter(y == 1) %>% .$ta_
+# empirical_pairs <- bind_cols("steps" = empirical_steps, "angles" = empirical_angles) %>% drop_na()
+
+temporal_movement_params$shape[1]
+
+# slice_sample(empirical_pairs, n = 5, replace = T)
+
+n_steps <- 10
+n_ch <- 100
+coef <- cov_values
+xy0 <- start_unif
+resc <- resources
+
+simulate_ssf <- function(n_steps, n_ch, coef, xy0, resc) { 
+  #sl <- rexp(n_steps * n_ch, rate = l) # l = 1, add into arguments if using exponential distribution for sl
+  sl <- rgamma(n_steps * n_ch, shape = temporal_movement_params$shape[1], scale = temporal_movement_params$scale[1])
+  ta <- rvonmises(n_steps * n_ch, m = 0, k = temporal_movement_params$kappa[1]) - pi
+  # hist(ta)
+  #ta <- runif(n_steps * n_ch, -pi, pi)
+  # sl <- unlist(as.vector(slice_sample(empirical_pairs, n = n_steps * n_ch, replace = T)[,1]))
+  # ta <- unlist(as.vector(slice_sample(empirical_pairs, n = n_steps * n_ch, replace = T)[,2]))
+  #stp_ta <- slice_sample(empirical_pairs, n = n_steps * n_ch, replace = T)
+  #sl <- as.vector(stp_ta[,1])
+  #ta <- as.numeric(stp_ta[,2])
+  #sl <- base::sample(x = empirical_steps, size = n_steps * n_ch, replace = TRUE)
+  #ta <- base::sample(x = empirical_angles, size = n_steps * n_ch, replace = TRUE)
+  steps <- rep(1:n_steps, each = n_ch)
+  x_0 <- xy0[1]
+  y_0 <- xy0[2]
+  x_s <- sl * sin(ta)
+  y_s <- sl * cos(ta)
+  x <- rep(NA, n_steps)
+  y <- rep(NA, n_steps)
+  x[1] <- x_0
+  y[1] <- y_0
+  # multiply resources with selection coef
+  for (i in 1:length(coef)) resc[[i]] <- resc[[i]] * coef[i][[1]]
+  
+  # i = 2
+  
+  for (i in 2:n_steps) {
+    # adding the modulo operator %% ensures a wrapped/toroid landscape, but the origin must be at (0,0)
+    x_pos <- (x[i - 1] + sl[steps == i] * sin(ta[steps == i])) %% ext(resc)[2] 
+    y_pos <- (y[i - 1] + sl[steps == i] * cos(ta[steps == i])) %% ext(resc)[4]
+    p <- exp(rowSums(terra::extract(resc, cbind(x_pos, y_pos))))
+    p[is.na(p)] <- 1e-6
+    w <- sample(n_ch, 1, prob = p)
+    x[i] <- x_pos[w]
+    y[i] <- y_pos[w]
+  }
+  data_frame(x = x, y = y)
+}
+
+```

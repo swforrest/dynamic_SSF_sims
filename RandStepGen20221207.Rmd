@@ -1,0 +1,1593 @@
+---
+title: "Djelk SSF analyses"
+author: "Scott Forrest"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(dev = "ragg_png")
+# knitr::opts_knit$set("C:/Users/n11207361/OneDrive - Queensland University of Technology/PhD - Scott Forrest/MODELLING/Habitat models")
+```
+
+# Setup packages
+
+```{r packages, message=FALSE, warning=FALSE}
+# , warning=FALSE, message=FALSE
+library(tidyverse)
+#devtools::install_github("jmsigner/amt")
+#install.packages("amt")
+# install.packages("installr")
+#install.packages("here")
+# install.packages("beepr")
+
+# library(installr)
+# updateR()
+packages <- c("amt", "lubridate", "terra", "survival", "car", "dplyr", "maptools", "jtools", "broom", "ggpubr", "here", "sf", "devtools", "raster", "beepr")
+walk(packages, require, character.only = T)
+
+here::here()
+getwd()
+
+#here::i_am("../OneDrive - Queensland University of Technology", "PhD - Scott Forrest", "DATA ANALYSIS", "ssf-analyses")
+```
+
+## Import data and clean
+
+```{r import data, echo=FALSE, message=FALSE}
+
+# buffalo <- read_csv(here("data", "All_djelkBuffalo_clean.csv"))
+buffalo <- read_csv("data/buffalo.csv")
+
+# buffalo %>% ggplot(aes(x = DateTime, y = as.factor(node), colour = as.factor(node)))  +
+#   geom_point() +
+#   theme_bw()
+# 
+# buffalo %>% filter(node == "2043") %>%  ggplot(aes(x = DateTime, y = lon, colour = as.factor(node)))  +
+#   geom_point(size = 1, colour = "black", alpha = 0.25) +
+#   ggtitle("Tag 2043") +
+#   theme_bw()
+
+buffalo <- buffalo %>% filter(!node %in% c("2014.GPS_COMPACT copy.csv", 2029, 2043, 2265, 2284, 2346))
+
+# buffalo %>% ggplot(aes(x = DateTime, y = as.factor(node), colour = as.factor(node)))  +
+#   geom_point() +
+#   theme_bw()
+
+#buffalo$node <- as.factor(buffalo$node)
+buffalo <- buffalo %>%  group_by(node) %>% arrange(DateTime, .by_group = T) %>% distinct(DateTime, .keep_all = T) %>% arrange(node) %>% mutate(ID = node)
+
+buffalo_clean <- buffalo[, c(12, 2, 4, 3)]
+colnames(buffalo_clean) <- c("id", "time", "lon", "lat")
+attr(buffalo_clean$time, "tzone") <- "Australia/Queensland"
+
+head(buffalo_clean)
+
+tz(buffalo_clean$time)
+
+```
+
+
+```{r}
+
+buffalo_clean %>% filter(id == 2014) %>% summarise(min_time = min(time), max_time = max(time))
+
+b05 <- buffalo_clean %>% filter(id == 2005)
+b14 <- buffalo_clean %>% filter(id == 2014)
+
+ggplot() +
+  geom_point(data = b05, aes(x = time, y = lat), alpha = 0.05) +
+  geom_point(data = b14, aes(x = time, y = lat), colour = "red", alpha = 0.05) +
+theme_classic()
+
+```
+
+
+
+## Setup trajectory
+
+```{r}
+
+buffalo_id <- as.numeric(as.factor(buffalo_clean$id))
+
+buffalo_all <- buffalo_clean %>% mk_track(id = id,
+                                           lon,
+                                           lat, 
+                                           time, 
+                                           #order_by_ts = F,
+                                           all_cols = T,
+                                           crs = 4326) %>% 
+  transform_coords(crs_to = 3112, crs_from = 4326) # Transformation to GDA94 / Geoscience Australia Lambert (https://epsg.io/3112)
+
+buffalo_all %>%
+  ggplot(aes(x = x_, y = y_, colour = t_)) +
+  geom_point(alpha = 0.25, size = 1) + # colour = "black", 
+  coord_fixed() +
+  scale_colour_viridis_c() +
+  theme_classic()
+
+```
+
+
+```{r}
+
+buffalo_all_nested <- buffalo_all %>% arrange(id) %>% nest(data = -"id") 
+
+```
+
+
+To determine required extent of raster
+
+```{r cropping raster}
+
+min(buffalo_all$x_) 
+max(buffalo_all$x_)
+min(buffalo_all$y_)
+max(buffalo_all$y_)
+
+```
+
+
+```{r}
+
+template_raster_cropped <- terra::rast(xmin = 0, 
+                               xmax = 60000, 
+                               ymin = -1463000, 
+                               ymax = -1406000, 
+                               resolution = 25, 
+                               crs = "epsg:3112")
+
+template_wgs84 <- project(template_raster_cropped, "epsg:4326")
+terra::ext(template_wgs84)
+
+```
+
+
+## Reading in raster layer(s)
+
+it works to just read in the raster_stack using terra - more code in the SSF mixed model fitting and prediction RMD.
+
+```{r importing landscape layers}
+
+# ndvi_rasters <- dir("mapping/tifs-only/ndvi/temporal_subset", pattern = "*.tif", full.names = T) %>% map(rast)
+# # ndvi_raster_amt <- raster::stack("mapping/cropped rasters/ndvi_raster_amt_25m_waterNA.tif") # does not import dates, which must be added manually
+# # 
+# file_sources <- map(ndvi_rasters, sources)
+# file_sources_vector <- unlist(file_sources)
+# 
+# years <- str_sub(file_sources_vector, -8, -5)  %>% as.numeric()
+# months<- str_sub(file_sources_vector, -15, -14) %>% str_replace(pattern = "_", replacement = "0")  %>% as.numeric()
+# day <- rep(15, length(file_sources_vector))
+# 
+# dates <- make_date(years, months, day)
+# 
+# ndvi_raster_amt <- raster::setZ(ndvi_raster_amt, dates)
+# ndvi_raster_amt <- ndvi_raster_amt[[order(dates)]]
+# getZ(ndvi_raster_amt)
+
+# plot(ndvi_raster_amt)
+# plot(ndvi_raster_amt[[18]])
+# 
+# getZ(ndvi_raster_amt[[18]])
+# 
+# raster::writeRaster(ndvi_raster_amt[[18]], "mapping/cropped rasters/ndvi_raster_amt_cropped_june19.tif")
+# raster::writeRaster(ndvi_raster_amt, "mapping/cropped rasters/ndvi_raster_amt_cropped.tif")
+
+```
+
+
+From GEE
+
+```{r}
+
+# ndvi_rasters <- dir("mapping/GEE/monthly_ndvi", pattern = "*.tif", full.names = T) %>% rast()
+# 
+# file_sources <- sources(ndvi_rasters)
+# years <- str_sub(file_sources, -20, -17)  %>% as.numeric()
+# months <- str_sub(file_sources, -15, -14) %>% as.numeric()
+# day <- rep(1, length(file_sources))
+# dates <- make_date(years, months, day)
+# time(ndvi_rasters) <- dates
+# 
+# plot(ndvi_rasters[[1]], range = c(-0.72,0.88))
+# 
+# for(i in 1:nlyr(ndvi_rasters)) {
+#   png(filename = paste("outputs/plots/ndvi_images/ndvi_", time(ndvi_rasters[[i]]), ".png", sep = ""))
+#   plot(ndvi_rasters[[i]], main = paste("NDVI ", time(ndvi_rasters[[i]]), sep = ""), range = c(-0.72,0.88))
+#   dev.off()
+# }
+# 
+# ndvi_projected <- terra::project(ndvi_rasters, template_raster_cropped)
+# 
+# for(i in 1:nlyr(ndvi_projected)) plot(ndvi_projected[[i]], main = paste("NDVI ", time(ndvi_rasters[[i]]), sep = ""), range = c(-0.72,0.88))
+
+# terra::writeRaster(ndvi_projected, "mapping/cropped rasters/ndvi_GEE_projected_20221220.tif")
+# terra::writeRaster(ndvi_projected, "mapping/cropped rasters/ndvi_GEE_projected_watermask20230207.tif")
+# ndvi_projected <- rast("mapping/cropped rasters/ndvi_GEE_projected_20221220.tif")
+# ndvi_projected <- rast("mapping/cropped rasters/ndvi_GEE_projected_watermask20230207.tif")
+# plot(ndvi_projected)
+
+```
+
+
+
+```{r}
+
+ndvi_summary <- terra::summary(ndvi_rasters)
+
+months <- seq(1,12,1)
+
+ndvi_monthly_mean_list <- list()
+
+for(i in 1:12) {
+  ndvi_monthly_mean_list[[i]] <- mean(ndvi_projected[[which(month(time(ndvi_projected)) == months[i])]])
+}
+
+ndvi_monthly_mean <- rast(ndvi_monthly_mean_list)
+for(i in 1:12) names(ndvi_monthly_mean[[i]]) <- paste("month_", i, sep = "")
+
+for(i in 1:nlyr(ndvi_monthly_mean)) plot(ndvi_monthly_mean[[i]], main = names(ndvi_monthly_mean[[i]]), range = c(-0.72,0.88)) 
+
+terra::writeRaster(ndvi_monthly_mean, "mapping/cropped rasters/ndvi_GEE_monthly_mean_20221220.tif")
+# ndvi_monthly_mean <- rast("mapping/cropped rasters/ndvi_GEE_monthly_mean_20221220.tif")
+
+```
+
+
+```{r}
+
+# nbr_rasters <- dir("mapping/tifs-only/nbr", pattern = "*.tif", full.names = T) %>% map(rast)
+# nbr_raster_amt <- raster::stack("mapping/cropped rasters/nbr_raster_amt_cropped.tif")
+# 
+# file_sources <- map(nbr_rasters, sources)
+# file_sources_vector <- unlist(file_sources)
+# 
+# years <- str_sub(file_sources_vector, -8, -5)  %>% as.numeric()
+# months<- str_sub(file_sources_vector, -15, -14) %>% str_replace(pattern = "_", replacement = "0")  %>% as.numeric()
+# day <- rep(15, nlayers(nbr_raster_amt))
+# 
+# dates <- make_date(years, months, day)
+# 
+# nbr_raster_amt <- raster::setZ(nbr_raster_amt, dates)
+# nbr_raster_amt <- nbr_raster_amt[[order(dates)]]
+# getZ(nbr_raster_amt)
+
+# plot(nbr_raster_amt)
+
+# raster::writeRaster(nbr_raster_amt, "mapping/cropped rasters/nbr_raster_amt_cropped.tif")
+
+```
+
+
+```{r}
+
+# ndwi_rasters <- dir("mapping/tifs-only/ndwi", pattern = "*.tif", full.names = T) %>% map(rast)
+# ndwi_raster_amt <- raster::stack("mapping/cropped rasters/ndwi_raster_amt_cropped.tif")
+# 
+# file_sources <- map(ndwi_rasters, sources)
+# file_sources_vector <- unlist(file_sources)
+# 
+# years <- str_sub(file_sources_vector, -8, -5)  %>% as.numeric()
+# months<- str_sub(file_sources_vector, -15, -14) %>% str_replace(pattern = "_", replacement = "0")  %>% as.numeric()
+# day <- rep(15, nlayers(ndwi_raster_amt))
+# 
+# dates <- make_date(years, months, day)
+# 
+# ndwi_raster_amt <- raster::setZ(ndwi_raster_amt, dates)
+# ndwi_raster_amt <- ndwi_raster_amt[[order(dates)]]
+# getZ(ndwi_raster_amt)
+
+# plot(ndwi_raster_amt)
+
+# raster::writeRaster(ndwi_raster_amt, "mapping/cropped rasters/ndwi_raster_amt_cropped.tif") 
+
+```
+
+
+Rather than get water distance from WOFS or similar, why not just get it temporally from the NDVI (< 0) layers
+
+```{r}
+
+# ndvi_stack_projected <- rast("mapping/cropped rasters/ndvi_terra_25m_20221125.tif")
+# water <- ndvi_projected[[10]] < - 0.1
+# plot(ndvi_projected[[10]])
+# water_stack <- ndvi_projected < 0
+# plot(water)
+# plot(water_stack)
+# 
+# water_stack_NA <- terra::subst(water_stack, from = 0, to = NA)
+# plot(water_stack_NA)
+
+# terra::writeRaster(water_stack, "mapping/cropped rasters/water_stack_20230207.tif")
+# terra::writeRaster(water_stack_NA, "mapping/cropped rasters/water_stackNA_20230207.tif")
+# water_stack <- rast("mapping/cropped rasters/water_stack_20230207.tif")
+# plot(water_stack)
+
+# terra::writeRaster(water_stack_NA, "mapping/cropped rasters/water_stackNA_20230207.tif")
+# water_stack_NA <- rast("mapping/cropped rasters/water_stackNA_20230207.tif")
+# plot(water_stack_NA)
+
+# plot(ndvi_projected)
+# ndvi_projected <- raster::mask(ndvi_projected, water, maskvalue = 1)
+# plot(ndvi_projected)
+
+# water_dist_stack <- terra::distance(water_stack_NA)
+# plot(water_dist_stack)
+
+# terra::writeRaster(water_dist_stack, "mapping/cropped rasters/water_dist_stack_20230207.tif")
+# water_dist_stack <- rast("mapping/cropped rasters/water_dist_stack_20230207.tif")
+
+```
+
+
+
+```{r}
+
+ndvi_projected <- rast("mapping/cropped rasters/ndvi_GEE_projected_watermask20230207.tif")
+
+plot(ndvi_projected[[7]])
+ndvi_july2018_scaled <- scale(ndvi_projected[[7]])
+plot(ndvi_july2018_scaled)
+
+(ndvi_projected[[7]] - mean(values(ndvi_projected[[7]], na.rm = TRUE))) / sd(values(ndvi_projected[[7]], na.rm = TRUE))
+
+scaling_mean <- mean(values(ndvi_projected[[7]], na.rm = TRUE)) # 0.4054526
+scaling_sd <- sd(values(ndvi_projected[[7]], na.rm = TRUE)) # 0.1113644
+
+ndvi_stack_scaled <- (ndvi_projected - mean(values(ndvi_projected[[7]], na.rm = TRUE))) / sd(values(ndvi_projected[[7]], na.rm = TRUE))
+plot(ndvi_stack_scaled)
+
+ndvi_rasters <- raster::stack(ndvi_projected)
+ndvi_rasters <- raster::setZ(ndvi_rasters, terra::time(ndvi_projected))
+getZ(ndvi_rasters) # check time is correct
+plot(ndvi_rasters)
+
+water_dist_stack <- rast("mapping/cropped rasters/water_dist_stack_20230207.tif")
+water_dist_rasters <- raster::stack(water_dist_stack)
+water_dist_rasters <- raster::setZ(water_dist_rasters, terra::time(water_dist_stack))
+plot(water_dist_rasters)
+
+# ndwi_stack_projected <- rast("mapping/cropped rasters/ndwi_terra_25m_20221125.tif")
+# ndwi_stack_projected <- raster::mask(ndwi_stack_projected, water, maskvalue = 1)
+# plot(ndwi_stack_projected)
+
+DEM_H <- raster("mapping/cropped rasters/DEM_H_raster.tif")
+slope <- raster("mapping/cropped rasters/slope_raster.tif")
+WOFS <- raster("mapping/cropped rasters/WOFS.tif")
+# WOFS05_dist <- raster("mapping/cropped rasters/wofs_05_dist.tif")
+# WOFS10_dist <- raster("mapping/cropped rasters/wofs_10_dist.tif")
+# WOFS15_dist <- raster("mapping/cropped rasters/wofs_15_dist.tif")
+# WOFS20_dist <- raster("mapping/cropped rasters/wofs_20_dist.tif")
+# WOFS25_dist <- raster("mapping/cropped rasters/WOFS25_dist.tif")
+# WOFS50_dist <- raster("mapping/cropped rasters/WOFS50_dist.tif")
+# WOFS80_dist <- raster("mapping/cropped rasters/WOFS80_dist.tif")
+veg_woody <- raster("mapping/cropped rasters/veg_woody.tif")
+veg_herby <- raster("mapping/cropped rasters/veg_herby.tif")
+canopy_cover <- raster("mapping/cropped rasters/canopy_cover.tif")
+
+names(DEM_H) <- "DEM_H"
+names(slope) <- "slope"
+names(WOFS) <- "WOFS"
+# names(WOFS05_dist) <- "WOFS05_dist"
+# names(WOFS10_dist) <- "WOFS10_dist"
+# names(WOFS15_dist) <- "WOFS15_dist"
+# names(WOFS20_dist) <- "WOFS20_dist"
+# names(WOFS25_dist) <- "WOFS25_dist"
+# names(WOFS50_dist) <- "WOFS50_dist"
+# names(WOFS80_dist) <- "WOFS80_dist"
+names(veg_woody) <- "veg_woody"
+names(veg_herby) <- "veg_herby"
+names(canopy_cover) <- "canopy_cover"
+
+plot(DEM_H)
+plot(slope)
+plot(WOFS)
+# plot(WOFS05_dist)
+# plot(WOFS10_dist)
+# plot(WOFS15_dist)
+# plot(WOFS20_dist)
+# plot(WOFS25_dist)
+# plot(WOFS50_dist)
+# plot(WOFS80_dist)
+plot(veg_woody)
+plot(veg_herby)
+plot(canopy_cover)
+
+```
+
+
+
+# Converting the GPS locations into steps and a track object
+
+Without splitting the track into bursts
+
+```{r sample EMPIRICAL available steps and extract TEMPORAL covariate values}
+
+buffalo_all_nested_steps <- buffalo_all_nested %>% 
+  mutate(steps = map(data, function(x)
+    x %>% track_resample(rate = hours(1), tolerance = minutes(10)) %>% steps()))
+    
+buffalo_all_steps <- buffalo_all_nested_steps %>% amt::select(id, steps) %>% amt::unnest(cols = steps) # %>% filter(!is.na(ta_)) 
+
+step_ids <- buffalo_all_steps %>% amt::group_by(id) %>% transmute(step_id_ = 1:n(), case_ = TRUE) %>% amt::ungroup() %>% dplyr::select(step_id_, case_)
+
+buffalo_all_steps <- bind_cols(buffalo_all_steps, step_ids)
+
+```
+
+
+With splitting the track into bursts. This results in some data loss (~116,000 points > ~ 106,000 points) due to the fact that the first two locations of any burst will be removed as there needs to be a step length (requiring two locations) and a turning angle (requiring three locations).
+
+```{r}
+
+buffalo_all_nested_steps_by_burst <- buffalo_all_nested %>% 
+  mutate(steps = map(data, function(x)
+    x %>% track_resample(rate = hours(1), tolerance = minutes(10)) %>%  
+  steps_by_burst())) 
+
+buffalo_all_steps_by_burst <- buffalo_all_nested_steps_by_burst %>% amt::select(id, steps) %>% amt::unnest(cols = steps) # %>% filter(!is.na(ta_)) 
+
+step_ids <- buffalo_all_steps_by_burst %>% amt::group_by(id) %>% transmute(step_id_ = 1:n(), case_ = TRUE) %>% amt::ungroup() %>% dplyr::select(step_id_, case_)
+
+buffalo_all_steps_by_burst <- bind_cols(buffalo_all_steps_by_burst, step_ids)
+
+```
+
+
+Checking the step distributions
+
+```{r}
+
+buffalo_all_steps %>% summarise(mean_sl = mean(sl_), median_sl = median(sl_)) 
+buffalo_all_steps %>% dplyr::group_by(id) %>% summarise(mean_sl = mean(sl_), median_sl = median(sl_)) %>% dplyr::ungroup()
+
+buffalo_all_steps %>% ggplot() +
+  geom_density(aes(x = sl_, fill = factor(id)), alpha = 0.1) +
+  geom_density(aes(x = sl_), colour = "red", alpha = 0.01) +
+  scale_y_continuous("Density") +
+  scale_x_continuous("Step length (m)") +
+  scale_fill_viridis_d(direction = -1) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+# ggsave("outputs/plots/step_length_density_20221220.png", width=150, height=90, units="mm", dpi = 300)
+
+buffalo_all_steps %>% ggplot() +
+  geom_density(aes(x = log(sl_), fill = factor(id)), alpha = 0.1) +
+  geom_density(aes(x = log(sl_)), colour = "red", alpha = 0.01) +
+  scale_y_continuous("Density") +
+  scale_x_continuous("Log of step length (m)") +
+  scale_fill_viridis_d(direction = -1) +
+  theme_classic() +
+  theme(legend.position = "none") 
+
+# ggsave("outputs/plots/step_length_density_log_20221220.png", width=150, height=90, units="mm", dpi = 300)
+
+buffalo_all_steps %>% ggplot() +
+  geom_density(aes(x = ta_, fill = factor(id)), alpha = 0.1) +
+  geom_density(aes(x = ta_), colour = "red", alpha = 0.01) +
+  scale_y_continuous("Density") +
+  scale_x_continuous("Turning angle (rad)") +
+  scale_fill_viridis_d(direction = -1) +
+  theme_classic() +
+  theme(legend.position = "none") 
+
+# ggsave("outputs/plots/turning angle_density_20221220.png", width=150, height=90, units="mm", dpi = 300)
+
+```
+
+
+## Generating empirical 'random' steps - here using the combined distribution of all individuals
+
+```{r}
+
+empirical_steps <- buffalo_all_steps$sl_
+empirical_angles <- buffalo_all_steps$ta_
+
+empirical_pairs <- bind_cols("steps" = empirical_steps, "angles" = empirical_angles) %>% drop_na()
+
+# testing the slice_sample function - it should take pairs of step length and turning angles
+slice_sample(empirical_pairs, n = 5, replace = T)
+
+``` 
+
+
+
+```{r}
+
+random_steps_empirical <- function(n_rand_steps, 
+                                   start_x, 
+                                   start_y, 
+                                   rel_angle, 
+                                   empirical_df,
+                                   step_id,
+                                   id) {
+  
+  sampled_matrix <- matrix(nrow = n_rand_steps, ncol = 8)
+  
+  for(i in 1:n_rand_steps){
+    
+    pair <- slice_sample(empirical_df, n = 1, replace = T)
+    
+    slr <- as.numeric(pair[1])
+    tar <- as.numeric(pair[2])
+    
+    new_x <- as.numeric(start_x + slr * cos(rel_angle + tar))
+    new_y <- as.numeric(start_y + slr * sin(rel_angle + tar))
+
+    sampled_matrix[i, 1] <- start_x
+    sampled_matrix[i, 2] <- start_y
+    sampled_matrix[i, 3] <- new_x
+    sampled_matrix[i, 4] <- new_y
+    sampled_matrix[i, 5] <- slr
+    sampled_matrix[i, 6] <- tar
+    sampled_matrix[i, 7] <- step_id
+    sampled_matrix[i, 8] <- id
+    
+    colnames(sampled_matrix) <- c("x1_", "y1_", "x2_", "y2_", "sl_", "ta_", "step_id_", "id")
+    
+  }
+  return(sampled_matrix)
+}
+
+```
+
+
+
+```{r}
+
+buffalo_all_steps <- buffalo_all_steps_by_burst
+
+n <- 10
+m <- nrow(buffalo_all_steps)
+
+sampled_df <- data.frame(matrix(nrow = 0, ncol = 8))
+colnames(sampled_df) <- c("x1_", "y1_", "x2_", "y2_", "sl_", "ta_", "step_id", "id")
+
+for(i in 1:m) {
+  
+  sampled_iter <- data.frame(random_steps_empirical(n_rand_steps =  n, 
+                       start_x = buffalo_all_steps$x1_[i],
+                       start_y = buffalo_all_steps$y1_[i],
+                       rel_angle = buffalo_all_steps$ta_[i],
+                       empirical_df = empirical_pairs,
+                       step_id = buffalo_all_steps$step_id_[i],
+                       id = as.numeric(buffalo_all_steps$id[i])))
+  
+  colnames(sampled_iter) <- c("x1_", "y1_", "x2_", "y2_", "sl_", "ta_", "step_id", "id")
+  
+  sampled_df <- bind_rows(sampled_df, sampled_iter)
+  
+}
+
+```
+
+
+
+```{r}
+
+available_steps <- sampled_df %>% transmute(id = as.character(id),
+                                            burst_ = NA, 
+                                            x1_ = x1_, 
+                                            x2_ = x2_, 
+                                            y1_ = y1_, 
+                                            y2_ = y2_, 
+                                            sl_ = sl_, 
+                                            direction_p = NA, 
+                                            ta_ = ta_, 
+                                            t1_ = NA, 
+                                            t2_ = NA, 
+                                            dt_ = NA, 
+                                            step_id_ = step_id, 
+                                            case_ = FALSE)
+
+
+# write_csv(available_steps, "outputs/sampled_available_steps_2022-9-8.csv")
+#buffalo_all_empirical <- read_csv("outputs/buffalo_all_empirical_steps_2022-9-7.csv")
+
+buffalo_all_empirical <- bind_rows(buffalo_all_steps, available_steps) # %>% group_by(id) %>% amt::arrange(step_id_, .by_group = T) %>% fill(c("burst_", "t1_", "t2_", "dt_")) # %>% ungroup()
+
+buffalo_all_empirical <- buffalo_all_empirical[order(buffalo_all_empirical$id, buffalo_all_empirical$step_id_),] %>% fill(c("burst_", "t1_", "t2_", "dt_"))
+
+# need to arrange by id and step_id without grouping/ungrouping
+
+#write_csv(buffalo_all_empirical, "outputs/buffalo_all_empirical_steps_2022-9-7.csv")
+#buffalo_all_empirical <- read_csv("outputs/buffalo_all_empirical_steps_2022-9-7.csv")
+
+# class(buffalo_all_empirical)
+
+```
+
+
+
+```{r}
+
+# dates <- dates[order(dates)]
+
+# ndwi_rasters <- dir("mapping/tifs-only/ndwi", pattern = "*.tif", full.names = T) %>% rast()
+# file_sources_vector <- sources(ndwi_rasters)
+# 
+# years <- str_sub(file_sources_vector, -8, -5)  %>% as.numeric()
+# months<- str_sub(file_sources_vector, -15, -14) %>% str_replace(pattern = "_", replacement = "0")  %>% as.numeric()
+# day <- rep(15, nlyr(ndwi_rasters))
+# 
+# dates <- make_date(years, months, day)
+# 
+# 
+# ndwi_rasters <- raster::stack(ndwi_stack_projected)
+# time(ndwi_stack_projected)
+# dates <- dates[order(dates)]
+# dates <- dates[1:16]
+# dates
+# ndwi_rasters <- raster::setZ(ndwi_rasters, dates)
+# getZ(ndwi_rasters)
+
+```
+
+
+
+```{r}
+
+buffalo_all_empirical_covs <- buffalo_all_empirical %>% 
+  
+  extract_covariates_var_time(ndvi_rasters,
+                              where = "end",
+                              when = "any",
+                              max_time = days(15),
+                              name_covar = "ndvi_temporal") %>% 
+  
+  extract_covariates_var_time(water_dist_rasters,
+                              where = "end",
+                              when = "any",
+                              max_time = days(15),
+                              name_covar = "water_dist") %>% 
+  
+  # extract_covariates_var_time(ndwi_rasters,
+  #                             where = "end",
+  #                             when = "any",
+  #                             max_time = days(15),
+  #                             name_covar = "ndwi_temporal") %>% 
+  # extract_covariates_var_time(nbr_raster_amt,
+  #                             where = "end",
+  #                             when = "any",
+  #                             max_time = days(15),
+  #                             name_covar = "nbr_temporal") %>% 
+  # extract_covariates_var_time(ndwi_dist, 
+  #                             where = "end",
+  #                             when = "any",  
+  #                             max_time = days(15),
+  #                             name_covar = "water_dist") %>%
+  
+  extract_covariates(veg_woody,
+                     where = "end") %>%
+  extract_covariates(veg_herby,
+                     where = "end") %>%
+  extract_covariates(canopy_cover,
+                     where = "end") %>%
+  extract_covariates(DEM_H,
+                     where = "both") %>% 
+  extract_covariates(slope,
+                     where = "both") %>% 
+  extract_covariates(WOFS,
+                     where = "end") %>% 
+  # extract_covariates(WOFS05_dist,
+  #                    where = "end") %>% 
+  # extract_covariates(WOFS10_dist,
+  #                    where = "end") %>% 
+  # extract_covariates(WOFS15_dist,
+  #                    where = "end") %>% 
+  # extract_covariates(WOFS20_dist,
+  #                    where = "end") %>% 
+  # extract_covariates(WOFS25_dist,
+  #                    where = "end") %>% 
+  # extract_covariates(WOFS50_dist,
+  #                    where = "end") %>% 
+  # extract_covariates(WOFS80_dist,
+  #                    where = "end") %>% 
+
+  
+  mutate(elev_delta = DEM_H_end - DEM_H_start,
+         elev_log = log(DEM_H_end),
+         water_dist_log = log(water_dist),
+         #slope_along = map_dbl(extract_covariates_along(slope), mean),
+         y = as.numeric(case_),
+         cos_ta_ = cos(ta_),
+         log_sl_ = log(sl_))
+
+
+write_csv(buffalo_all_empirical_covs, "outputs/buffalo_empirical_covs_20230208.csv")
+# buffalo_all_empirical_covs <- read_csv("outputs/buffalo_all_emp_covs_20221209.csv")
+
+```
+
+
+
+```{r}
+
+# ndvi_df <- as.data.frame(ndvi_stack_projected[[13]], xy = TRUE)
+
+buffalo_all_empirical_covs %>% ggplot() +
+  geom_raster(data = ndvi_df, aes(x, y, fill = nd)) +
+  geom_point(data = . %>% filter(y == 0), aes(x = x2_, y = y2_), colour = "black", size = 0.1, alpha = 0.1) +
+  geom_point(data = . %>% filter(y == 1), aes(x = x2_, y = y2_), colour = "red", size = 0.1, alpha = 0.1) +
+  coord_equal() +
+  theme_bw()
+
+buffalo_all_empirical_covs %>% ggplot() +
+  geom_raster(data = ndvi_df, aes(x, y, fill = nd)) +
+  geom_point(data = . %>% filter(y == 0) %>% drop_na(ndvi_temporal), 
+             aes(x = x2_, y = y2_), colour = "black", size = 0.1, alpha = 0.1) +
+  geom_point(data = . %>% filter(y == 1) %>% drop_na(ndvi_temporal), 
+             aes(x = x2_, y = y2_), colour = "red", size = 0.1, alpha = 0.1) +
+  coord_equal() +
+  theme_bw()
+
+```
+
+
+## Generating parametric 'random' steps
+
+Firstly, fitting Gamma and von Mises distributions to the steps of ALL individuals (only one Gamma and one von Mises distribution for the whole population)
+
+```{r}
+
+buffalo_parametric_popn <- buffalo_all_steps_by_burst %>% random_steps(n_control = 10,
+                                            sl_distr = fit_distr(.$sl_, "gamma"),
+                                            ta_distr = fit_distr(.$ta_, "vonmises")) %>% 
+  mutate(y = as.numeric(case_))
+
+gamma <- fit_distr(buffalo_all_steps_by_burst$sl_, "gamma")
+vonmises <- fit_distr(buffalo_all_steps_by_burst$ta_, "vonmises")
+
+gamma$params$shape
+gamma$params$scale
+vonmises$params$kappa
+vonmises$params$mu
+
+write_csv(buffalo_parametric_popn, "outputs/buffalo_parametric_popn_nocovs_20230208.csv")
+
+```
+
+
+
+```{r}
+
+buffalo_parametric_popn %>% ggplot() +
+  # geom_raster(data = ndvi_df, aes(x, y, fill = nd)) +
+  geom_point(data = . %>% filter(y == 0), aes(x = x2_, y = y2_), colour = "black", size = 0.1, alpha = 0.1) +
+  geom_point(data = . %>% filter(y == 1), aes(x = x2_, y = y2_), colour = "red", size = 0.1, alpha = 0.1) +
+  coord_equal() +
+  theme_bw()
+
+
+buffalo_parametric_popn %>% ggplot() +
+  geom_density(data = . %>% filter(y == 1), aes(x = sl_, fill = factor(id)), alpha = 0.1) +
+  geom_density(data = . %>% filter(y == 0), aes(x = sl_), colour = "red", alpha = 0.01) +
+  scale_y_continuous("Density") +
+  scale_x_continuous("Step length (m)") +
+  scale_fill_viridis_d(direction = -1) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+# ggsave("outputs/plots/step_length_density_20221220.png", width=150, height=90, units="mm", dpi = 300)
+
+
+buffalo_parametric_popn %>% ggplot() +
+  geom_density(data = . %>% filter(y == 1), aes(x = log(sl_), fill = factor(id)), alpha = 0.1) +
+  geom_density(data = . %>% filter(y == 0), aes(x = log(sl_)), colour = "red", alpha = 0.01) +
+  scale_y_continuous("Density") +
+  scale_x_continuous("Log of step length (m)") +
+  scale_fill_viridis_d(direction = -1) +
+  theme_classic() +
+  theme(legend.position = "none") 
+
+# ggsave("outputs/plots/step_length_density_log_20221220.png", width=150, height=90, units="mm", dpi = 300)
+
+
+buffalo_parametric_popn %>% ggplot() +
+  geom_density(data = . %>% filter(y == 1), aes(x = ta_, fill = factor(id)), alpha = 0.1) +
+  geom_density(data = . %>% filter(y == 0), aes(x = ta_), colour = "red", alpha = 0.01) +
+  scale_y_continuous("Density") +
+  scale_x_continuous("Turning angle (rad)") +
+  scale_fill_viridis_d(direction = -1) +
+  theme_classic() +
+  theme(legend.position = "none") 
+
+# ggsave("outputs/plots/turning angle_density_20221220.png", width=150, height=90, units="mm", dpi = 300)
+
+
+```
+
+
+```{r}
+
+buffalo_parametric_popn_covs <- buffalo_parametric_popn %>% 
+  
+  extract_covariates_var_time(ndvi_rasters,
+                              where = "end",
+                              when = "any",
+                              max_time = days(15),
+                              name_covar = "ndvi_temporal") %>% 
+  
+  extract_covariates_var_time(water_dist_rasters,
+                              where = "end",
+                              when = "any",
+                              max_time = days(15),
+                              name_covar = "water_dist") %>% 
+  
+  extract_covariates(veg_woody,
+                     where = "end") %>%
+  extract_covariates(veg_herby,
+                     where = "end") %>%
+  extract_covariates(canopy_cover,
+                     where = "end") %>%
+  extract_covariates(DEM_H,
+                     where = "both") %>% 
+  extract_covariates(slope,
+                     where = "both") %>% 
+  extract_covariates(WOFS,
+                     where = "end") %>%
+  
+  mutate(elev_delta = DEM_H_end - DEM_H_start,
+         elev_log = log(DEM_H_end),
+         water_dist_log = log(water_dist),
+         #slope_along = map_dbl(extract_covariates_along(slope), mean),
+         y = as.numeric(case_),
+         cos_ta_ = cos(ta_),
+         log_sl_ = log(sl_))
+
+
+write_csv(buffalo_parametric_popn_covs, "outputs/buffalo_parametric_popn_covs_20230208.csv")
+# buffalo_all_empirical_covs <- read_csv("outputs/buffalo_all_emp_covs_20221209.csv")
+
+```
+
+Secondly, fitting Gamma and von Mises distributions to the steps of EACH individual (N Gamma and N von Mises distributions)
+
+```{r}
+
+buffalo_all_nested <- buffalo_all %>% arrange(id) %>% nest(data = -"id") 
+
+buffalo_all_nested_steps_by_burst <- buffalo_all_nested %>% 
+  mutate(steps = map(data, function(x)
+    x %>% track_resample(rate = hours(1), tolerance = minutes(10)) %>%  
+  steps_by_burst() %>%
+    random_steps(n_control = 10,
+                 sl_distr = fit_distr(.$sl_, "gamma"),
+                 ta_distr = fit_distr(.$ta_, "vonmises"))))
+
+buffalo_parametric_indv <- buffalo_all_nested_steps_by_burst %>% 
+  amt::select(id, steps) %>% 
+  amt::unnest(cols = steps) %>% 
+  mutate(y = as.numeric(case_)) # %>% filter(!is.na(ta_))
+
+write_csv(buffalo_parametric_indv, "outputs/buffalo_parametric_indv_nocovs_20230208.csv")
+
+```
+
+Getting the movement distribution parameters for each individual
+
+```{r}
+
+shape <- vector()
+scale <- vector()
+kappa <- vector()
+mu <- vector()
+
+for(i in 1:length(buffalo_all_nested_steps_by_burst$data)) {
+  
+shape[[i]] <- attr(buffalo_all_nested_steps_by_burst$steps[[i]], which = "sl_")$params$shape
+scale[[i]] <- attr(buffalo_all_nested_steps_by_burst$steps[[i]], which = "sl_")$params$scale
+kappa[[i]] <- attr(buffalo_all_nested_steps_by_burst$steps[[i]], which = "ta_")$params$kappa
+mu[[i]] <- attr(buffalo_all_nested_steps_by_burst$steps[[i]], which = "ta_")$params$mu
+
+}
+
+movement_parameters <- data.frame("id" = buffalo_all_nested_steps_by_burst$id, "shape" = shape, "scale" = scale, "kappa" = kappa, "mu" = mu)
+
+# write_csv(movement_parameters, "outputs/buffalo_parametric_indv_movement_params_20230208.csv")
+
+```
+
+
+
+```{r}
+
+buffalo_parametric_indv %>% ggplot() +
+  geom_density(data = . %>% filter(y == 1), aes(x = sl_, colour = factor(id)), alpha = 0.1) +
+  geom_density(data = . %>% filter(y == 0), aes(x = sl_, group = factor(id)), colour = "red", alpha = 0.1) +
+  scale_y_continuous("Density") +
+  scale_x_continuous("Step length (m)") +
+  scale_colour_viridis_d(direction = -1) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+buffalo_parametric_indv %>% ggplot() +
+  geom_density(data = . %>% filter(y == 1), aes(x = log(sl_), colour = factor(id)), alpha = 0.1) + # alpha doesn't do anything
+  geom_density(data = . %>% filter(y == 0), aes(x = log(sl_), group = factor(id)), colour = "red", alpha = 0.1) +
+  scale_y_continuous("Density") +
+  scale_x_continuous("Log of step length (m)") +
+  scale_colour_viridis_d(direction = -1) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+buffalo_parametric_indv %>% ggplot() +
+  geom_density(data = . %>% filter(y == 1), aes(x = ta_, colour = factor(id)), alpha = 0.1) +
+  geom_density(data = . %>% filter(y == 0), aes(x = ta_, group = factor(id)), colour = "red", alpha = 0.1) +
+  scale_y_continuous("Density") +
+  scale_x_continuous("Step length (m)") +
+  scale_colour_viridis_d(direction = -1) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+```
+
+
+
+```{r}
+
+buffalo_parametric_indv_covs <- buffalo_parametric_indv %>% 
+  
+  extract_covariates_var_time(ndvi_rasters,
+                              where = "end",
+                              when = "any",
+                              max_time = days(15),
+                              name_covar = "ndvi_temporal") %>% 
+  
+  extract_covariates_var_time(water_dist_rasters,
+                              where = "end",
+                              when = "any",
+                              max_time = days(15),
+                              name_covar = "water_dist") %>% 
+  
+  extract_covariates(veg_woody,
+                     where = "end") %>%
+  extract_covariates(veg_herby,
+                     where = "end") %>%
+  extract_covariates(canopy_cover,
+                     where = "end") %>%
+  extract_covariates(DEM_H,
+                     where = "both") %>% 
+  extract_covariates(slope,
+                     where = "both") %>% 
+  extract_covariates(WOFS,
+                     where = "end") %>%
+  
+  mutate(elev_delta = DEM_H_end - DEM_H_start,
+         elev_log = log(DEM_H_end),
+         water_dist_log = log(water_dist),
+         #slope_along = map_dbl(extract_covariates_along(slope), mean),
+         y = as.numeric(case_),
+         cos_ta_ = cos(ta_),
+         log_sl_ = log(sl_))
+
+
+write_csv(buffalo_parametric_indv_covs, "outputs/buffalo_parametric_indv_covs_20230208.csv")
+# buffalo_all_empirical_covs <- read_csv("outputs/buffalo_all_emp_covs_20221209.csv")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+this code is mostly draft
+
+```{r}
+
+buffalo_slope_along <- extract_covariates_along(buffalo_all_empirical_covs, slope)
+
+buffalo_empirical_subset <- buffalo_all_empirical_covs %>% filter(step_id_ < 100)
+
+buffalo_slope_along <- extract_covariates_along(buffalo_empirical_subset, slope)
+
+
+ave_slope_along <- buffalo_slope_along %>% map_dbl(mean)
+write_csv(ave_slope_along, "outputs/buffalo_ave_slope_slong_2022-9-9.csv")
+
+max_slope_along <- buffalo_slope_along %>% map_dbl(max)
+
+buffalo_all_empirical_covs <- buffalo_all_empirical_covs %>%
+  mutate(
+    # ave_slope_along = ave_slope_along,
+    #      max_slope_along = max_slope_along,
+         year = year(buffalo_all_empirical_covs$t1_),
+         month = month(buffalo_all_empirical_covs$t1_),
+         hour = hour(buffalo_all_empirical_covs$t1_),
+         day = day(buffalo_all_empirical_covs$t1_))
+
+
+write_csv(buffalo_all_empirical_covs, "outputs/buffalo_all_emp_covs_2022-9-9.csv")
+
+buffalo_all_empirical_covs %>% head(n = 10) 
+
+```
+
+
+
+```{r}
+
+#write_csv(buffalo_all_empirical_covs, "outputs/buffalo_all_emp_covs_noslope_2022-9-8.csv") #, overwrite = T
+#buffalo_2005_empirical_ssf_covs <- read_csv("outputs/buffalo_2005_empirical_2022-9-5.csv")
+
+length(unique(buffalo_2005_empirical_ssf_covs$step_id_)) # check number of used steps
+
+```
+
+
+### Save workspace
+
+```{r save workspace}
+
+save.image(file = "workspace images/workspace_image_empirical_SSF_withslope_22-9-9.RData")
+# load(file = "workspace images/workspace_image_empirical_SSF_22-9-5.RData")
+
+```
+
+
+```{r}
+
+buffalo_all_empirical_covs %>% ggplot() +
+  geom_point(data = . %>% filter(case_ == 1), 
+             aes(x = t1_, y = ndvi_temporal), 
+             colour = "red", size = 0.25, alpha = 0.5) +
+  geom_point(data = . %>% filter(case_ == 1), 
+             aes(x = t1_, y = ndwi_temporal), 
+             colour = "black", size = 0.25, alpha = 0.5) +
+  # geom_point(data = . %>% filter(case_ == 1), 
+  #            aes(x = t1_, y = nbr_temporal), 
+  #            colour = "blue", size = 0.25, alpha = 0.5) +
+  #geom_point(data = . %>% filter(case_ == 1), 
+            # aes(x = t1_, y = water_dist), 
+            # colour = "green", size = 0.25, alpha = 0.5) +
+  theme_classic()
+  
+
+buffalo_all_empirical_covs %>% ggplot() +
+  geom_point(data = . %>% filter(case_ == 0), 
+             aes(x = t1_, y = ndvi_temporal), 
+             colour = "black", size = 1, alpha = 0.25) +
+  geom_point(data = . %>% filter(case_ == 1), 
+             aes(x = t1_, y = ndvi_temporal), 
+             colour = "red", size = 1, alpha = 0.5) +
+  ggtitle("NDVI") +
+  theme_classic()
+
+
+buffalo_all_empirical_covs %>% ggplot() +
+  geom_point(data = . %>% filter(case_ == 0), 
+             aes(x = t1_, y = ndwi_temporal), 
+             colour = "black", size = 1, alpha = 0.25) +
+  geom_point(data = . %>% filter(case_ == 1), 
+             aes(x = t1_, y = ndwi_temporal), 
+             colour = "red", size = 1, alpha = 0.5) +
+  ggtitle("NDWI") +
+  theme_classic()
+
+
+# buffalo_all_empirical_covs %>% ggplot() +
+#   geom_point(data = . %>% filter(case_ == 0), 
+#              aes(x = t1_, y = nbr_temporal), 
+#              colour = "black", size = 1, alpha = 0.25) +
+#   geom_point(data = . %>% filter(case_ == 1), 
+#              aes(x = t1_, y = nbr_temporal), 
+#              colour = "red", size = 1, alpha = 0.5) +
+#   ggtitle("NBR") +
+#   theme_classic()
+
+# buffalo_all_empirical_covs %>% ggplot() +
+#   geom_point(data = . %>% filter(case_ == 0), 
+#              aes(x = t1_, y = water_dist), 
+#              colour = "black", size = 1, alpha = 0.25) +
+#   geom_point(data = . %>% filter(case_ == 1), 
+#              aes(x = t1_, y = water_dist), 
+#              colour = "red", size = 1, alpha = 0.5) +
+#   ggtitle("Water Distance (m)") +
+#   theme_classic()
+
+buffalo_all_empirical_covs %>% ggplot() +
+  geom_point(data = . %>% filter(case_ == 0), 
+             aes(x = t1_, y = DEM_H_end), 
+             colour = "black", size = 1, alpha = 0.25) +
+  geom_point(data = . %>% filter(case_ == 1), 
+             aes(x = t1_, y = DEM_H_end), 
+             colour = "red", size = 1, alpha = 0.5) +
+  ggtitle("Elevation (m)") +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% ggplot() +
+  geom_point(data = . %>% filter(case_ == 0), 
+             aes(x = t1_, y = delta_elev), 
+             colour = "black", size = 1, alpha = 0.25) +
+  geom_point(data = . %>% filter(case_ == 1), 
+             aes(x = t1_, y = delta_elev), 
+             colour = "red", size = 1, alpha = 0.5) +
+  ggtitle("Delta Elevation (m)") +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% ggplot() +
+  geom_point(data = . %>% filter(case_ == 0), 
+             aes(x = t1_, y = slope_end), 
+             colour = "black", size = 1, alpha = 0.25) +
+  geom_point(data = . %>% filter(case_ == 1), 
+             aes(x = t1_, y = slope_end), 
+             colour = "red", size = 1, alpha = 0.5) +
+  ggtitle("Slope (degrees)") +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% ggplot() +
+  geom_point(data = . %>% filter(case_ == 0), 
+             aes(x = t1_, y = WOFS25_dist), 
+             colour = "black", size = 1, alpha = 0.25) +
+  geom_point(data = . %>% filter(case_ == 1), 
+             aes(x = t1_, y = WOFS25_dist), 
+             colour = "red", size = 1, alpha = 0.5) +
+  ggtitle("Distance to WOFS > 25% (m)") +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% ggplot() +
+  geom_point(data = . %>% filter(case_ == 0), 
+             aes(x = t1_, y = WOFS50_dist), 
+             colour = "black", size = 1, alpha = 0.25) +
+  geom_point(data = . %>% filter(case_ == 1), 
+             aes(x = t1_, y = WOFS50_dist), 
+             colour = "red", size = 1, alpha = 0.5) +
+  ggtitle("Distance to WOFS > 50% (m)") +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% ggplot() +
+  geom_point(data = . %>% filter(case_ == 0), 
+             aes(x = t1_, y = WOFS80_dist), 
+             colour = "black", size = 1, alpha = 0.25) +
+  geom_point(data = . %>% filter(case_ == 1), 
+             aes(x = t1_, y = WOFS80_dist), 
+             colour = "red", size = 1, alpha = 0.5) +
+  ggtitle("Distance to WOFS > 80% (m)") +
+  theme_classic()
+
+# buffalo_all_empirical_covs %>% ggplot() +
+#   geom_point(data = . %>% filter(case_ == 0), 
+#              aes(x = t1_, y = slope_along), 
+#              colour = "black", size = 1, alpha = 0.25) +
+#   geom_point(data = . %>% filter(case_ == 1), 
+#              aes(x = t1_, y = slope_along), 
+#              colour = "red", size = 1, alpha = 0.5) +
+#   ggtitle("Average slope along step (degrees)") +
+#   theme_classic()
+
+```
+
+
+
+```{r plot random steps}
+
+buffalo_all_empirical_covs %>%
+  ggplot(aes(x = ta_, fill = case_)) +
+  geom_density(alpha = 0.5) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>%
+  ggplot(aes(x = log(sl_), fill = case_)) +
+  geom_density(alpha = 0.5) +
+  scale_x_continuous(limits = c(-5, 10)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>%
+  ggplot(aes(x = log(sl_), fill = case_)) +
+  geom_histogram(bins = 100, alpha = 0.5) +
+  scale_x_continuous(limits = c(-5, 10)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>%
+  ggplot(aes(x = x2_, y = y2_)) +
+  geom_point(colour = "black", alpha = 0.1, size = 1) +
+  geom_point(aes(x = x1_, y = y1_), colour = "red", alpha = 0.03, size = 1) +
+  coord_fixed() +
+  theme_classic()
+
+# buffalo_2005_ssf_covs %>% # to compare to parametric sampling
+#   ggplot(aes(x = x2_, y = y2_)) +
+#   geom_point(colour = "black", alpha = 0.1, size = 1) +
+#   geom_point(aes(x = x1_, y = y1_), colour = "red", alpha = 0.03, size = 1) +
+#   coord_fixed() +
+#   theme_classic()
+
+```
+
+
+### NDVI responses
+
+```{r}
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = ndvi_temporal, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = ndvi_temporal, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(factor(id))) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = ndvi_temporal, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(month)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = ndvi_temporal, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% filter(year == "2018" & month == "8") %>% 
+  ggplot(aes(x = ndvi_temporal, fill = case_)) + # 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = ndvi_temporal, fill = case_)) + # 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(month)) +
+  theme_classic()
+
+```
+
+
+### NDWI responses
+
+```{r}
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = ndwi_temporal, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = ndwi_temporal, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(factor(id))) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = ndwi_temporal, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(month)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = ndwi_temporal, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% filter(year == "2018" & month == "8") %>% 
+  ggplot(aes(x = ndwi_temporal, fill = case_)) + # 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = ndwi_temporal, fill = case_)) + # 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(month)) +
+  theme_classic()
+
+```
+
+
+### nbr responses
+
+```{r}
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = nbr_temporal, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = nbr_temporal, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(month)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = nbr_temporal, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% filter(year == "2018" & month == "8") %>% 
+  ggplot(aes(x = nbr_temporal, fill = case_)) + # 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+```
+
+
+### water_dist responses
+
+```{r}
+
+# buffalo_all_empirical_covs %>% 
+#   ggplot(aes(x = water_dist, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+#   geom_density(alpha = 0.5) +
+#   theme_classic()
+# 
+# buffalo_all_empirical_covs %>% 
+#   ggplot(aes(x = water_dist, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+#   geom_density(alpha = 0.5) +
+#   facet_wrap(vars(month)) +
+#   theme_classic()
+# 
+# buffalo_all_empirical_covs %>% 
+#   ggplot(aes(x = water_dist, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+#   geom_density(alpha = 0.5) +
+#   facet_wrap(vars(hour)) +
+#   theme_classic()
+# 
+# buffalo_all_empirical_covs %>% filter(year == "2019" & month == "7") %>% 
+#   ggplot(aes(x = water_dist, fill = case_)) + # 
+#   geom_density(alpha = 0.5) +
+#   facet_wrap(vars(hour)) +
+#   theme_classic()
+
+```
+
+
+### elev responses
+
+```{r}
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = DEM_H_end, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = DEM_H_end, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(factor(id))) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = DEM_H_end, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(month)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = DEM_H_end, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% filter(year == "2019" & month == "7") %>% 
+  ggplot(aes(x = DEM_H_end, fill = case_)) + # 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+```
+
+
+
+### delta_elev responses
+
+```{r}
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = delta_elev, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = delta_elev, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(factor(id))) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = delta_elev, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(month)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = delta_elev, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% filter(year == "2019" & month == "7") %>% 
+  ggplot(aes(x = delta_elev, fill = case_)) + # 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+```
+
+
+### slope responses
+
+```{r}
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = slope_end, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = slope_end, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(factor(id))) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = slope_end, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(month)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = slope_end, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% filter(year == "2019" & month == "7") %>% 
+  ggplot(aes(x = slope_end, fill = case_)) + # 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+```
+
+
+### along slope responses
+
+```{r}
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = slope_along, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = slope_along, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(month)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = slope_along, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% filter(year == "2019" & month == "7") %>% 
+  ggplot(aes(x = slope_along, fill = case_)) + # 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+```
+
+
+
+### distance to WOFS 25 responses
+
+```{r}
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = WOFS25_dist, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = WOFS25_dist, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(factor(id))) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = WOFS25_dist, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(month)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = WOFS25_dist, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% filter(year == "2019" & month == "3") %>% 
+  ggplot(aes(x = WOFS25_dist, fill = case_)) + # 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+```
+
+### distance to WOFS 50 responses
+
+```{r}
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = WOFS50_dist, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = WOFS50_dist, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(factor(id))) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = WOFS50_dist, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(month)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = WOFS50_dist, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% filter(year == "2019" & month == "7") %>% 
+  ggplot(aes(x = WOFS50_dist, fill = case_)) + # 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+```
+
+
+### distance to WOFS 80 responses
+
+```{r}
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = WOFS80_dist, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = WOFS80_dist, fill = case_)) + # %>% filter(year == "2018" & (month == "7" | month == "8")) 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(factor(id))) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = WOFS80_dist, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(month)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% 
+  ggplot(aes(x = WOFS80_dist, fill = case_)) + # filter(year == "2018" & (month == "7" | month == "8")) %>% 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+buffalo_all_empirical_covs %>% filter(year == "2018" & month == "8") %>% 
+  ggplot(aes(x = WOFS80_dist, fill = case_)) + # 
+  geom_density(alpha = 0.5) +
+  facet_wrap(vars(hour)) +
+  theme_classic()
+
+```
