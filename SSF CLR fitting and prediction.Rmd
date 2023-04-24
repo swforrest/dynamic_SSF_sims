@@ -231,16 +231,16 @@ movement_parameters_year <- movement_parameters %>% filter(id %in% buffalo_year_
 formula_clr <- y ~ 
                
                ndvi_scaled +
-               month_s1:ndvi_scaled +
-               month_s2:ndvi_scaled +
-               month_c1:ndvi_scaled +
-               month_c2:ndvi_scaled +
+               yday_s1:ndvi_scaled +
+               yday_s2:ndvi_scaled +
+               yday_c1:ndvi_scaled +
+               yday_c2:ndvi_scaled +
   
                I(ndvi_scaled^2) +
-               month_s1:I(ndvi_scaled^2) +
-               month_s2:I(ndvi_scaled^2) +
-               month_c1:I(ndvi_scaled^2) +
-               month_c2:I(ndvi_scaled^2) +
+               yday_s1:I(ndvi_scaled^2) +
+               yday_s2:I(ndvi_scaled^2) +
+               yday_c1:I(ndvi_scaled^2) +
+               yday_c2:I(ndvi_scaled^2) +
                
                # WOFS05_dist_scaled +
                # month_s1:WOFS05_dist_scaled +
@@ -263,41 +263,47 @@ formula_clr <- y ~
                # month_c1:elev_log +
                # month_c2:elev_log +
                
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
+               # slope_scaled +
+               # month_s1:slope_scaled +
+               # month_s2:slope_scaled +
+               # month_c1:slope_scaled +
+               # month_c2:slope_scaled +
                
-               veg_herby +
-               month_s1:veg_herby +
-               month_s2:veg_herby +
-               month_c1:veg_herby +
-               month_c2:veg_herby +
+               # herby_scaled +
+               # yday_s1:herby_scaled +
+               # yday_s2:herby_scaled +
+               # yday_c1:herby_scaled +
+               # yday_c2:herby_scaled +
                
                canopy_scaled +
-               month_s1:canopy_scaled +
-               month_s2:canopy_scaled +
-               month_c1:canopy_scaled +
-               month_c2:canopy_scaled +
+               yday_s1:canopy_scaled +
+               yday_s2:canopy_scaled +
+               yday_c1:canopy_scaled +
+               yday_c2:canopy_scaled +
+  
+               I(canopy_scaled^2) +
+               yday_s1:I(canopy_scaled^2) +
+               yday_s2:I(canopy_scaled^2) +
+               yday_c1:I(canopy_scaled^2) +
+               yday_c2:I(canopy_scaled^2) +
                
                sl +
-               month_s1:sl +
-               month_s2:sl +
-               month_c1:sl +
-               month_c2:sl +
+               yday_s1:sl +
+               yday_s2:sl +
+               yday_c1:sl +
+               yday_c2:sl +
                
                log_sl +
-               month_s1:log_sl +
-               month_s2:log_sl +
-               month_c1:log_sl +
-               month_c2:log_sl +
+               yday_s1:log_sl +
+               yday_s2:log_sl +
+               yday_c1:log_sl +
+               yday_c2:log_sl +
                
                cos_ta +
-               month_s1:cos_ta +
-               month_s2:cos_ta +
-               month_c1:cos_ta +
-               month_c2:cos_ta +
+               yday_s1:cos_ta +
+               yday_s2:cos_ta +
+               yday_c1:cos_ta +
+               yday_c2:cos_ta +
                
                strata(step_id)
 
@@ -316,7 +322,7 @@ for(i in 1:length(unique(buffalo_CLR_year$id))) {
 
   clogit_model_list[[i]] <- fit_clogit(buffalo_subset, formula = formula_clr)
   # print(summary(clogit_model))
-  # print(AIC(clogit_model))
+  print(AIC(clogit_model_list[[i]]))
 
 }
 
@@ -360,11 +366,12 @@ clogit_coefs <- do.call(rbind, clogit_model_coef_list)
 clogit_coefs$id <- rep(buffalo_ids, each = length(clogit_model_list[[1]]$model$coefficients))
 clogit_coefs
 
-# clogit_coefs <- clogit_coefs %>% mutate(weight = 1/se^2) # does the same as above
-
 # clogit_coefs %>% filter(coef == "ndvi_temporal")
 clogit_coefs %>% filter(coef == "ndvi_scaled")
-clogit_coefs %>% filter(coef == "slope_scaled")
+clogit_coefs %>% filter(coef == "I(ndvi_scaled^2)")
+clogit_coefs %>% filter(coef == "canopy_scaled")
+clogit_coefs %>% filter(coef == "I(canopy_scaled^2)")
+# clogit_coefs %>% filter(coef == "slope_scaled")
 
 # mean(x = ndvi_lin_df$coefs)
 # weighted.mean(x = ndvi_lin_df$coefs, w = ndvi_lin_df$weights)
@@ -405,15 +412,15 @@ clogit_weighted_means
 
 ```
 
-
+Calculating the coefficient curves across the year (by yday)
 
 ```{r}
 
 # clogit_coef_df <- clogit_model_coef_list[[1]]
 
-x_month <- seq(0, 12, 0.1)
+x_yday <- seq(0, 365, 1)
 
-y_month <- function(x,
+y_yday <- function(x,
                     lin_coef,
                     sin_coef1,
                     sin_coef2,
@@ -421,101 +428,101 @@ y_month <- function(x,
                     cos_coef2) {
 
   lin_coef +
-    (sin_coef1 * sin(2 * pi * x / 12)) +
-    (sin_coef2 * sin(4 * pi * x / 12)) +
-    (cos_coef1 * cos(2 * pi * x / 12)) +
-    (cos_coef2 * cos(4 * pi * x / 12))
+    (sin_coef1 * sin(2 * pi * x / 365)) +
+    (sin_coef2 * sin(4 * pi * x / 365)) +
+    (cos_coef1 * cos(2 * pi * x / 365)) +
+    (cos_coef2 * cos(4 * pi * x / 365))
 }
 
 
 
 harmonic_coefs_function <- function(clogit_coef_df) {
 
-y_ndvi_month <- map_dbl(x_month,
-             y_month,
+y_ndvi_yday <- map_dbl(x_yday,
+             y_yday,
              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:month_c2")])
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c2")])
 
-# y_ndvi_month <- map_dbl(x_month,
-#              y_month,
+# y_ndvi_yday <- map_dbl(x_yday,
+#              y_yday,
 #              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal")],
-#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_s1")],
-#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_s2")],
-#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_c1")],
-#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_c2")])
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:yday_s1")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:yday_s2")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:yday_c1")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:yday_c2")])
 
-# y_wofs05_month <- map_dbl(x_month,
-#              y_month,
+# y_wofs05_yday <- map_dbl(x_yday,
+#              y_yday,
 #              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled")],
-#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_s1")],
-#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_s2")],
-#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_c1")],
-#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_c2")])
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:yday_s1")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:yday_s2")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:yday_c1")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:yday_c2")])
 # 
-# y_wofs05_Q_month <- map_dbl(x_month,
-#              y_month,
+# y_wofs05_Q_yday <- map_dbl(x_yday,
+#              y_yday,
 #              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2)")],
-#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_s1")],
-#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_s2")],
-#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_c1")],
-#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_c2")])
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):yday_s1")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):yday_s2")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):yday_c1")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):yday_c2")])
 
-y_slope_month <- map_dbl(x_month,
-             y_month,
+y_slope_yday <- map_dbl(x_yday,
+             y_yday,
              clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled:month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled:month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled:month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled:month_c2")])
+             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled:yday_c2")])
 
-y_herby_month <- map_dbl(x_month,
-             y_month,
+y_herby_yday <- map_dbl(x_yday,
+             y_yday,
              clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby:month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby:month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby:month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby:month_c2")])
+             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby:yday_c2")])
 
-y_canopy <- map_dbl(x_month,
-             y_month,
+y_canopy <- map_dbl(x_yday,
+             y_yday,
              clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:month_c2")])
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c2")])
 
-y_sl <- map_dbl(x_month,
-             y_month,
+y_sl <- map_dbl(x_yday,
+             y_yday,
              clogit_coef_df$value[which(clogit_coef_df$coef == "sl")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:month_c2")])
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c2")])
 
-y_log_sl <- map_dbl(x_month,
-             y_month,
+y_log_sl <- map_dbl(x_yday,
+             y_yday,
              clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:month_c2")])
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c2")])
 
-y_cos_ta <- map_dbl(x_month,
-             y_month,
+y_cos_ta <- map_dbl(x_yday,
+             y_yday,
              clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:month_c2")])
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c2")])
 
-return(data.frame("NDVI" = y_ndvi_month, 
-                  # "wofs05" = y_wofs05_month, 
-                  # "wofs05_Q" = y_wofs05_Q_month, 
-                  "Slope" = y_slope_month, 
-                  "Herbaceous_vegetation" = y_herby_month, 
+return(data.frame("NDVI" = y_ndvi_yday, 
+                  # "wofs05" = y_wofs05_yday, 
+                  # "wofs05_Q" = y_wofs05_Q_yday, 
+                  "Slope" = y_slope_yday, 
+                  "Herbaceous_vegetation" = y_herby_yday, 
                   "Canopy_cover" = y_canopy, 
                   "Step_length" = y_sl,
                   "log_Step_length" = y_log_sl, 
