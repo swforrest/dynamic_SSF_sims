@@ -516,7 +516,7 @@ glmmTMB_model <- glmmTMB(y ~ -1 +
                            # (0 + canopy_scaled | id)
                              (0 + poly(canopy_scaled, degree = 2, raw = FALSE) | id),
                            
-                         data = buffalo_month_subset, 
+                         data = buffalo_CLR_year, 
                          family = poisson,
                          map = list(theta = factor(c(NA, 1:6))),
                          start = list(theta = c(log(1e3), rep(0,6))) # 

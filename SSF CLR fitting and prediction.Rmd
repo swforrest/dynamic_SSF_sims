@@ -22,7 +22,7 @@ library(tidyverse)
 
 packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", 
               "RColorBrewer", "patchwork", "ecospat", "ggmap", "basemaps", "mapedit", 
-              "sf", "ggpubr")
+              "sf", "ggpubr", "circular")
 
 walk(packages, require, character.only = T)
 
@@ -33,119 +33,175 @@ Import buffalo telemetry data.
 
 ```{r message = FALSE}
 
-buffalo_all_covs <- read_csv("outputs/buffalo_all_emp_covs_20221220.csv")
+# buffalo_CLR <- read_csv(file = "outputs/buffalo_parametric_indv_covs_20230208.csv")
+# using the population estimate as the TENTATIVE distribution will make it easier to estimate the weighted mean estimate of the movement kernel
+buffalo_data <- read_csv(file = "outputs/buffalo_parametric_popn_covs_20230208.csv")
 
-unique(buffalo_all_covs$id)
+unique(buffalo_data$id)
 
-buffalo_all_covs <- buffalo_all_covs %>% 
-  filter(id != 2346) %>% 
-  mutate(year = year(t1_), 
+# scaling_mean <- mean(values(ndvi_projected[[7]], na.rm = TRUE)) # 0.4054526 for July 2018
+# scaling_sd <- sd(values(ndvi_projected[[7]], na.rm = TRUE)) # 0.1113644 for July 2018
+
+buffalo_CLR <- buffalo_data %>% 
+  mutate(id_num = as.numeric(factor(id)), 
+         step_id = step_id_, 
+         x1 = x1_, x2 = x2_, 
+         y1 = y1_, y2 = y2_, 
+         t1 = t1_, t1_rounded = round_date(buffalo_data$t1_, "hour"), t2 = t2_, 
+         sl = sl_, log_sl = log_sl_, 
+         ta = ta_, cos_ta = cos_ta_,
+         year = year(t1_), 
          month = month(t1_), 
-         month_factor = factor(month(t1_)),
+         # month_factor = factor(month(t1_)),
          hour = hour(t1_),
-         hour_factor = factor(hour),
-         day = day(t1_),
-         day_factor = factor(day(t1_)),
-         step_id_factor = factor(step_id_),
+         # hour_factor = factor(hour),
+         # day = day(t1_),
+         # day_factor = factor(day(t1_)),
+         # step_id_factor = factor(step_id_),
+         ndvi_scaled = ((ndvi_temporal - 0.4054526) / 0.1113644),
          canopy_01 = canopy_cover/100,
-         # ndvi_scaled = scale(ndvi_temporal), # for temporal covariates this will misalign values between months
-         # ndwi_scaled = scale(ndwi_temporal),
          herby_scaled = scale(veg_herby),
          canopy_scaled = scale(canopy_01),
          elev_scaled = scale(DEM_H_end),
-         elev_delta_scaled = scale(delta_elev),
+         elev_delta_scaled = scale(elev_delta),
+         elev_log_scaled = scale(elev_log),
          slope_scaled = scale(slope_end),
-         WOFS05_dist_scaled = scale(WOFS05_dist),
-         WOFS10_dist_scaled = scale(WOFS10_dist),
-         WOFS15_dist_scaled = scale(WOFS15_dist),
-         WOFS20_dist_scaled = scale(WOFS20_dist),
-         WOFS25_dist_scaled = scale(WOFS25_dist),
-         WOFS50_dist_scaled = scale(WOFS50_dist),
-         WOFS80_dist_scaled = scale(WOFS80_dist),
-         # hour_s1 = sin(2*pi*hour/24),
-         # hour_s2 = sin(4*pi*hour/24),
-         # hour_s3 = sin(8*pi*hour/24),
-         # hour_c1 = cos(2*pi*hour/24),
-         # hour_c2 = cos(4*pi*hour/24),
-         # hour_c3 = cos(8*pi*hour/24),
          month_s1 = sin(2*pi*month/12),
          month_s2 = sin(4*pi*month/12),
-         month_s3 = sin(8*pi*month/12),
-         # month_s4 = sin(16*pi*month/12),
          month_c1 = cos(2*pi*month/12),
-         month_c2 = cos(4*pi*month/12),
-         month_c3 = cos(8*pi*month/12))
-         # month_c4 = cos(16*pi*month/12))
-
-buffalo_all_covs %>% summarise(min_time = min(t1_), max_time = max(t1_),
-                               min_x = min(x2_), max_x = max(x2_),
-                               min_y = min(y2_), max_y = max(y2_))
+         month_c2 = cos(4*pi*month/12)) %>%
+  drop_na(c(ndvi_temporal, veg_herby, canopy_01, sl_)) %>% 
+  dplyr::select(!(burst_:case_))
 
 ```
 
-
-Checking correlation between predictor variables.
+Determining how many individuals have at least 1 year of data
 
 ```{r}
 
-cor(buffalo_all_covs$ndvi_temporal, buffalo_all_covs$ndwi_temporal, use = "complete.obs")
+buffalo_CLR %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
+  geom_point(alpha = 0.1) +
+  scale_y_discrete("Buffalo ID") +
+  scale_x_datetime("Date") +
+  scale_colour_viridis_d() +
+  theme_bw() +
+  theme(legend.position = "none")
 
-ggscatter(buffalo_all_covs, x = "ndvi_temporal", y = "ndwi_temporal", 
-          add = "reg.line", conf.int = TRUE, 
-          cor.coef = TRUE, cor.method = "pearson",
-          xlab = "NDVI", ylab = "NDWI")
-
-
-correlation_df <- buffalo_all_covs[,c(15:18, 20, 22, 24)]
-
-cor(correlation_df, use = "complete.obs")
-
+buffalo_CLR %>% dplyr::group_by(id) %>%  
+  summarise(min_time = min(t1), max_time = max(t1),
+            min_x = min(x2), max_x = max(x2),
+            min_y = min(y2), max_y = max(y2))
 
 ```
 
-
-Checking autocorrelation
-
 ```{r}
 
-buffalo_all_covs %>% filter(id == 2021 & y == 1) %>% dplyr::select(ndvi_temporal)
+buffalo_CLR %>% filter(y == 1 & id == 2005) %>% ggplot(aes(x = x1, y = y1, colour = t1)) +
+  geom_point(alpha = 0.5) +
+  geom_path(alpha = 0.5) +
+  coord_equal() +
+  scale_y_continuous("Northing (m)") +
+  scale_x_continuous("Easting (m)") +
+  scale_colour_datetime() +
+  theme_bw() +
+  theme(legend.position = "none")
 
-buffalo_all_covs %>% filter(id == 2021 & y == 1) %>% ggplot(aes(x = t1_, y = ndvi_temporal)) +
-  geom_line()
-
-mean_pseu_ndvi <- buffalo_all_covs %>% filter(y == 0) %>% 
-  dplyr::group_by(id, step_id_) %>% 
-  summarise(mean_pseu_ndvi = mean(ndvi_temporal)) 
-
-buffalo_y1_ndvi_diff <- buffalo_all_covs %>% filter(y == 1) %>% mutate(mean_pseu_ndvi = mean_pseu_ndvi$mean_pseu_ndvi, ndvi_diff = ndvi_temporal - mean_pseu_ndvi)
-
-buffalo_y1_ndvi_diff %>% filter(id == 2018) %>% ggplot(aes(x = t1_, y = ndvi_diff)) +
-  geom_line(size = 0.1) +
-  theme_classic()
-
-buffalo_y1_ndvi_diff %>% ggplot(aes(x = t1_, y = ndvi_diff)) +
-  geom_line() +
-  facet_wrap(facets = vars(id)) +
-  theme_classic()
-
-acf_2018 <- acf(buffalo_y1_ndvi_diff %>% filter(id == 2018) %>% dplyr::select(ndvi_diff), na.action = na.pass)
+ggsave("outputs/plots/buffalo_data_id2005_20230309.png",
+       width=150, height=90, units="mm", dpi = 300)
 
 ```
 
 
 
+Filtering by animals that have more than a year of data
+
 ```{r}
 
-unique(buffalo_all_covs$id)
+buffalo_year_ids <- c(2005, 2014, 2018, 2022, 2024, 2154, 2158, 2327, 2354, 2387)
+buffalo_CLR_year <- buffalo_CLR %>% filter(id %in% buffalo_year_ids)
+unique(buffalo_CLR_year$id)
+
+```
+
+Movement parameters from random sampling
+
+```{r}
+
+# gamma <- fit_distr(buffalo_all_steps_by_burst$sl_, "gamma")$params$shape
+# vonmises <- fit_distr(buffalo_all_steps_by_burst$ta_, "vonmises")
+
+# population
+gamma$params$shape # 0.438167
+gamma$params$scale # 534.3507
+vonmises$params$kappa # 0.1848126
+vonmises$params$mu # 0
+
+movement_parameters <- read_csv("outputs/buffalo_parametric_indv_movement_params_20230208.csv")
+
+movement_parameters_year <- movement_parameters %>% filter(id %in% buffalo_year_ids)
 
 ```
 
 
-Subsetting buffalo data to assess single individuals and months
 
 ```{r}
 
-buffalo_subset <- buffalo_all_covs %>% filter(id == 2005 & year == 2018 & month == 8)
+# x <- seq(0, 12, length.out = 1000)
+# 
+# s1 <- sin((2 * pi * x) / 12)
+# s2 <- sin((4 * pi * x) / 12)
+# c1 <- cos((2 * pi * x) / 12)
+# c2 <- cos((4 * pi * x) / 12)
+# 
+# harmonics <-data.frame("x" = rep(x, 4), 
+#            "Harmonics" = rep(c("s1", "s2", "c1", "c2"), each = 1000),
+#            "values" = c(s1, s2, c1, c2))
+# 
+# a <- ggplot(harmonics %>% filter(Harmonics == "s1")) +
+#   geom_line(aes(x = x, y = values, colour = Harmonics)) +
+#   geom_hline(yintercept = 0, linetype = "dashed") +
+#   scale_y_continuous("Magnitude of the coefficient") +
+#   scale_x_continuous("Month", breaks = 1:12) +
+#   scale_colour_viridis_d() +
+#   theme_classic()
+# 
+# b <- ggplot(harmonics %>% filter(Harmonics == "c1")) +
+#   geom_line(aes(x = x, y = values, colour = Harmonics)) +
+#   geom_hline(yintercept = 0, linetype = "dashed") +
+#   scale_y_continuous("Magnitude of the coefficient") +
+#   scale_x_continuous("Month", breaks = 1:12) +
+#   scale_colour_viridis_d() +
+#   theme_classic()
+# 
+# c <- ggplot(harmonics %>% filter(Harmonics == "s2")) +
+#   geom_line(aes(x = x, y = values, colour = Harmonics)) +
+#   geom_hline(yintercept = 0, linetype = "dashed") +
+#   scale_y_continuous("Magnitude of the coefficient") +
+#   scale_x_continuous("Month", breaks = 1:12) +
+#   scale_colour_viridis_d() +
+#   theme_classic()
+# 
+# d <- ggplot(harmonics %>% filter(Harmonics == "c2")) +
+#   geom_line(aes(x = x, y = values, colour = Harmonics)) +
+#   geom_hline(yintercept = 0, linetype = "dashed") +
+#   scale_y_continuous("Magnitude of the coefficient") +
+#   scale_x_continuous("Month", breaks = 1:12) +
+#   scale_colour_viridis_d() +
+#   theme_classic()
+# 
+# e <- ggplot(harmonics) +
+#   geom_line(aes(x = x, y = values, colour = Harmonics)) +
+#   geom_hline(yintercept = 0, linetype = "dashed") +
+#   scale_y_continuous("Magnitude of the coefficient") +
+#   scale_x_continuous("Month", breaks = 1:12) +
+#   scale_colour_viridis_d() +
+#   theme_classic()
+# 
+# plots <- c(a,b,c,d,e)
+# 
+# ggsave("outputs/plots/harmonic_plots_b_20230309.png",
+#                      plot = b,
+#   width=150, height=90, units="mm", dpi = 300)
 
 ```
 
@@ -153,72 +209,15 @@ buffalo_subset <- buffalo_all_covs %>% filter(id == 2005 & year == 2018 & month 
 
 ## Conditional logistic regression model
 
-Without harmonics - month by month piece wise
-
 ```{r}
 
-clogit_model <- buffalo_subset %>% 
-  
-  fit_clogit(case_ ~ 
-               ndvi_temporal +
-               WOFS05_dist_scaled +
-               I(WOFS05_dist_scaled^2) +
-               # WOFS80_dist_scaled +
-               # I(WOFS80_dist_scaled^2) +
-               elev_scaled +
-               slope_scaled +
-               # veg_herby +
-               canopy_01 +
+formula_clr <- y ~ 
                
-               log_sl_ +
-               cos_ta_ +
-               
-               strata(step_id_))
-
-# summary(clogit_model)
-AIC(clogit_model)
-
-```
-
-
-```{r}
-
-x <- buffalo_subset$WOFS05_dist_scaled
-y <- x * clogit_model$model$coefficients["WOFS05_dist_scaled"] + x^2 * clogit_model$model$coefficients["I(WOFS05_dist_scaled^2)"]
-
-plot(x, y)
-plot(x, y, xlim = c(-0.5, 0.5))
-
-
-x <- buffalo_subset$WOFS80_dist_scaled
-y <- x * clogit_model$model$coefficients["WOFS80_dist_scaled"] + x^2 * clogit_model$model$coefficients["I(WOFS80_dist_scaled^2)"]
-
-plot(x, y)
-plot(x, y, xlim = c(-0.5, 0.5))
-
-```
-
-
-
-```{r}
-
-buffalo_subset <- buffalo_inla %>% filter(id == 2005)
-
-```
-
-
-
-```{r}
-
-clogit_model <- buffalo_subset %>% 
-  
-  fit_clogit(y ~ 
-               
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
+               ndvi_scaled +
+               month_s1:ndvi_scaled +
+               month_s2:ndvi_scaled +
+               month_c1:ndvi_scaled +
+               month_c2:ndvi_scaled +
                
                # WOFS05_dist_scaled +
                # month_s1:WOFS05_dist_scaled +
@@ -235,11 +234,11 @@ clogit_model <- buffalo_subset %>%
                # WOFS80_dist_scaled +
                # I(WOFS80_dist_scaled^2) +
                
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
+               # elev_log +
+               # month_s1:elev_log +
+               # month_s2:elev_log +
+               # month_c1:elev_log +
+               # month_c2:elev_log +
                
                slope_scaled +
                month_s1:slope_scaled +
@@ -277,2517 +276,30 @@ clogit_model <- buffalo_subset %>%
                month_c1:cos_ta +
                month_c2:cos_ta +
                
-               strata(step_id))
-
-summary(clogit_model)
-AIC(clogit_model)
-
-```
-
-
-Checking the length of data for each individual. Due to the steps_by_burst, which separates trajectories into bursts, any missing values will result in additionaly missing values that don't have turning angles, which acts to thin the data. This may be worth exploring in further detail later (although for now it should be fine).
-
-This is mostly a problem when also estimating the movement parameters (as the time intervals between locations differs). For a statistical framework that uses 'independent data' (i.e. RSF, habitat suitability model), then this won't matter, as the time between the steps (and step lengths and turning angles) doesn't matter.
-
-```{r}
-
-subset_id <- unique(buffalo_all_covs$id)[2]
-buffalo_subset14 <- buffalo_all_covs %>% filter(id == subset_id)
-
-unique(buffalo_subset05$step_id_)
-length(unique(buffalo_subset05$step_id_))
-
-unique(buffalo_subset14$step_id_)
-length(unique(buffalo_subset14$step_id_))
-
-
-ggplot() +
-  geom_point(data = buffalo_subset05, aes(x = t1_, y = y1_), alpha = 0.01) +
-  geom_point(data = buffalo_subset14, aes(x = t1_, y = y1_), colour = "red", alpha = 0.01) +
-theme_classic()
-
-hist(buffalo_subset05$dt_)
-hist(buffalo_subset14$dt_)
-
-hist(buffalo_subset05$step_id_, breaks = 1000)
-hist(buffalo_subset14$step_id_, breaks = 1000)
-
-# length(unique(buffalo_subset$step_id_))
-# hist(buffalo_all_covs$step_id_)
-
-buffalo_subset %>% summarise(min_time = min(t1_), max_time = max(t1_),
-                               min_x = min(x2_), max_x = max(x2_),
-                               min_y = min(y2_), max_y = max(y2_))
-
-```
-
-
-
-```{r}
-
-i = 5
-
-subset_id <- unique(buffalo_all_covs$id)[i]
-buffalo_subset <- buffalo_all_covs %>% filter(id == subset_id)
-
-clogit_model <- buffalo_subset %>% 
-  
-  fit_clogit(case_ ~ 
-               
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-
-               # WOFS80_dist_scaled +
-               # I(WOFS80_dist_scaled^2) +
-
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-
-               # veg_herby +
-
-               canopy_01 +
-               month_s1:canopy_01 +
-               month_s2:canopy_01 +
-               month_c1:canopy_01 +
-               month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_))
-
-# summary(clogit_model)
-AIC(clogit_model)
-
-```
-
-
-Setting up model formulas for model selection
-
-```{r}
-
-formula <- clogit_model$model$formula
-
-formula <- case_ ~ 
-  ndvi_temporal +
-  strata(step_id_)
-
-fit_clogit(buffalo_subset, formula = formula)
-
-```
-
-
-### First round of step-wise model selection
-
-```{r}
-
-formula_list <- vector(mode = "list", length = 8)
-
-#### FORMULA 1 ####
-
-formula_list[[1]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 2 ####
-
-formula_list[[2]] <- case_ ~ 
-  
-               # ndvi_temporal +
-               # month_s1:ndvi_temporal +
-               # month_s2:ndvi_temporal +
-               # month_c1:ndvi_temporal +
-               # month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 3 ####
-
-formula_list[[3]] <- case_ ~ 
-  
-               # ndvi_temporal +
-               # month_s1:ndvi_temporal +
-               # month_s2:ndvi_temporal +
-               # month_c1:ndvi_temporal +
-               # month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-               # 
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 4 ####
-
-formula_list[[4]] <- case_ ~ 
-  
-               # ndvi_temporal +
-               # month_s1:ndvi_temporal +
-               # month_s2:ndvi_temporal +
-               # month_c1:ndvi_temporal +
-               # month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 5 ####
-
-formula_list[[5]] <- case_ ~ 
-  
-               # ndvi_temporal +
-               # month_s1:ndvi_temporal +
-               # month_s2:ndvi_temporal +
-               # month_c1:ndvi_temporal +
-               # month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 6 ####
-
-formula_list[[6]] <- case_ ~ 
-  
-               # ndvi_temporal +
-               # month_s1:ndvi_temporal +
-               # month_s2:ndvi_temporal +
-               # month_c1:ndvi_temporal +
-               # month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               veg_herby +
-                month_s1:veg_herby +
-               month_s2:veg_herby +
-               month_c1:veg_herby +
-               month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 7 ####
-
-formula_list[[7]] <- case_ ~ 
-  
-               # ndvi_temporal +
-               # month_s1:ndvi_temporal +
-               # month_s2:ndvi_temporal +
-               # month_c1:ndvi_temporal +
-               # month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               canopy_01 +
-               month_s1:canopy_01 +
-               month_s2:canopy_01 +
-               month_c1:canopy_01 +
-               month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 8 ####
-
-formula_list[[8]] <- case_ ~ 
-  
-               # ndvi_temporal +
-               # month_s1:ndvi_temporal +
-               # month_s2:ndvi_temporal +
-               # month_c1:ndvi_temporal +
-               # month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-```
-
-
-For a single individual
-
-```{r}
-
-for(j in 1:8) {
-  clogit_model <- fit_clogit(buffalo_subset, formula = formula_list[[j]])
-  print(AIC(clogit_model))
-}
-
-# summary(clogit_model)
-# AIC(clogit_model)
+               strata(step_id)
 
 ```
 
 Looping over all individuals
-
-```{r}
-
-aic_df <- data.frame("id" = rep(unique(buffalo_all_covs$id), 
-                                each = length(formula_list)), 
-                     "model_no" = rep(1:length(formula_list), 
-                                      length(unique(buffalo_all_covs$id))),
-                     "aic" = NA)
-
-# aic <- vector(mode = "list", length = length(formula_list))
-
-for(i in 1:length(unique(buffalo_all_covs$id))) {
-   
-subset_id <- unique(buffalo_all_covs$id)[i]
-buffalo_subset <- buffalo_all_covs %>% filter(id == subset_id)
-
-for(j in 1:length(formula_list)) {
-  
-  clogit_model <- fit_clogit(buffalo_subset, formula = formula_list[[j]])
-  print(AIC(clogit_model))
-  aic_df$aic[[(((i - 1) * length(formula_list)) + j)]] <- AIC(clogit_model)
-  
-  # print(AIC(fit_clogit(buffalo_subset, formula = formula_list[[j]])))
-  
-}
-
-}
-
-```
-
-The model with ndvi is the lowest on average over all the individuals (AIC = 24269.61), and will be selected for the next round.
-
-```{r}
-
-aic_df %>% group_by(model_no) %>% summarise(mean= mean(aic))
-
-```
-
-
-### Second round of model selection
-
-```{r}
-
-formula_list <- vector(mode = "list", length = 7)
-
-#### FORMULA 1 ####
-
-formula_list[[1]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 2 ####
-
-formula_list[[2]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 3 ####
-
-formula_list[[3]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-               # 
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 4 ####
-
-formula_list[[4]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 5 ####
-
-formula_list[[5]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 6 ####
-
-formula_list[[6]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               veg_herby +
-                month_s1:veg_herby +
-               month_s2:veg_herby +
-               month_c1:veg_herby +
-               month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 7 ####
-
-formula_list[[7]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               canopy_01 +
-               month_s1:canopy_01 +
-               month_s2:canopy_01 +
-               month_c1:canopy_01 +
-               month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-```
-
-
-Looping over all individuals
-
-```{r}
-
-aic_df <- data.frame("id" = rep(unique(buffalo_all_covs$id), 
-                                each = length(formula_list)), 
-                     "model_no" = rep(1:length(formula_list), 
-                                      length(unique(buffalo_all_covs$id))),
-                     "aic" = NA)
-
-for(i in 1:length(unique(buffalo_all_covs$id))) {
-   
-subset_id <- unique(buffalo_all_covs$id)[i]
-buffalo_subset <- buffalo_all_covs %>% filter(id == subset_id)
-
-for(j in 1:length(formula_list)) {
-  
-  clogit_model <- fit_clogit(buffalo_subset, formula = formula_list[[j]])
-  print(AIC(clogit_model))
-  aic_df$aic[[(((i - 1) * length(formula_list)) + j)]] <- AIC(clogit_model)
-  
-}
-
-}
-
-```
-
-The model with ndvi + elev is the lowest on average over all the individuals (AIC = 24104.05), and will be selected for the next round.
-
-```{r}
-
-aic_df %>% group_by(model_no) %>% summarise(mean= mean(aic))
-
-```
-
-
-### Third round of step-wise model selection
-
-```{r}
-
-formula_list <- vector(mode = "list", length = 6)
-
-#### FORMULA 1 ####
-
-formula_list[[1]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 2 ####
-
-formula_list[[2]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 3 ####
-
-formula_list[[3]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-               # 
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 4 ####
-
-formula_list[[4]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 5 ####
-
-formula_list[[5]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               veg_herby +
-                month_s1:veg_herby +
-               month_s2:veg_herby +
-               month_c1:veg_herby +
-               month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 6 ####
-
-formula_list[[6]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               # WOFS05_dist_scaled +
-               # month_s1:WOFS05_dist_scaled +
-               # month_s2:WOFS05_dist_scaled +
-               # month_c1:WOFS05_dist_scaled +
-               # month_c2:WOFS05_dist_scaled +
-               # 
-               # I(WOFS05_dist_scaled^2) +
-               # month_s1:I(WOFS05_dist_scaled^2) +
-               # month_s2:I(WOFS05_dist_scaled^2) +
-               # month_c1:I(WOFS05_dist_scaled^2) +
-               # month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               canopy_01 +
-               month_s1:canopy_01 +
-               month_s2:canopy_01 +
-               month_c1:canopy_01 +
-               month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-```
-
-
-Looping over all individuals
-
-```{r}
-
-aic_df <- data.frame("id" = rep(unique(buffalo_all_covs$id), 
-                                each = length(formula_list)), 
-                     "model_no" = rep(1:length(formula_list), 
-                                      length(unique(buffalo_all_covs$id))),
-                     "aic" = NA)
-
-for(i in 1:length(unique(buffalo_all_covs$id))) {
-   
-subset_id <- unique(buffalo_all_covs$id)[i]
-buffalo_subset <- buffalo_all_covs %>% filter(id == subset_id)
-
-for(j in 1:length(formula_list)) {
-  
-  clogit_model <- fit_clogit(buffalo_subset, formula = formula_list[[j]])
-  print(AIC(clogit_model))
-  aic_df$aic[[(((i - 1) * length(formula_list)) + j)]] <- AIC(clogit_model)
-  
-}
-
-}
-
-```
-
-
-The model with ndvi + elev + quadratic wofs 05 is the lowest on average over all the individuals (AIC = 24010.62), and will be selected for the next round.
-
-```{r}
-
-aic_df %>% group_by(model_no) %>% summarise(mean= mean(aic))
-
-```
-
-
-### Fourth round of step-wise model selection
-
-```{r}
-
-formula_list <- vector(mode = "list", length = 4)
-
-#### FORMULA 1 ####
-
-formula_list[[1]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 2 ####
-
-formula_list[[2]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 3 ####
-
-formula_list[[3]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               veg_herby +
-                month_s1:veg_herby +
-               month_s2:veg_herby +
-               month_c1:veg_herby +
-               month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 4 ####
-
-formula_list[[4]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               # slope_scaled +
-               # month_s1:slope_scaled +
-               # month_s2:slope_scaled +
-               # month_c1:slope_scaled +
-               # month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               canopy_01 +
-               month_s1:canopy_01 +
-               month_s2:canopy_01 +
-               month_c1:canopy_01 +
-               month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-```
-
-
-Looping over all individuals
-
-```{r}
-
-aic_df <- data.frame("id" = rep(unique(buffalo_all_covs$id), 
-                                each = length(formula_list)), 
-                     "model_no" = rep(1:length(formula_list), 
-                                      length(unique(buffalo_all_covs$id))),
-                     "aic" = NA)
-
-for(i in 1:length(unique(buffalo_all_covs$id))) {
-   
-subset_id <- unique(buffalo_all_covs$id)[i]
-buffalo_subset <- buffalo_all_covs %>% filter(id == subset_id)
-
-for(j in 1:length(formula_list)) {
-  
-  clogit_model <- fit_clogit(buffalo_subset, formula = formula_list[[j]])
-  print(AIC(clogit_model))
-  aic_df$aic[[(((i - 1) * length(formula_list)) + j)]] <- AIC(clogit_model)
-  
-}
-
-}
-
-```
-
-
-The model with ndvi + elev + quadratic wofs05 + slope is the lowest on average over all the individuals (AIC = 23945.03), and will be selected for the next round.
-
-```{r}
-
-aic_df %>% group_by(model_no) %>% summarise(mean= mean(aic))
-
-```
-
-
-### Fifth round of step-wise model selection
-
-```{r}
-
-formula_list <- vector(mode = "list", length = 3)
-
-#### FORMULA 1 ####
-
-formula_list[[1]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 2 ####
-
-formula_list[[2]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-               # 
-               veg_herby +
-                month_s1:veg_herby +
-               month_s2:veg_herby +
-               month_c1:veg_herby +
-               month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 3 ####
-
-formula_list[[3]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-               # 
-               # veg_herby +
-               #  month_s1:veg_herby +
-               # month_s2:veg_herby +
-               # month_c1:veg_herby +
-               # month_c2:veg_herby +
-               # 
-               canopy_01 +
-               month_s1:canopy_01 +
-               month_s2:canopy_01 +
-               month_c1:canopy_01 +
-               month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-```
-
-
-Looping over all individuals
-
-```{r}
-
-aic_df <- data.frame("id" = rep(unique(buffalo_all_covs$id), 
-                                each = length(formula_list)), 
-                     "model_no" = rep(1:length(formula_list), 
-                                      length(unique(buffalo_all_covs$id))),
-                     "aic" = NA)
-
-for(i in 1:length(unique(buffalo_all_covs$id))) {
-   
-subset_id <- unique(buffalo_all_covs$id)[i]
-buffalo_subset <- buffalo_all_covs %>% filter(id == subset_id)
-
-for(j in 1:length(formula_list)) {
-  
-  clogit_model <- fit_clogit(buffalo_subset, formula = formula_list[[j]])
-  print(AIC(clogit_model))
-  aic_df$aic[[(((i - 1) * length(formula_list)) + j)]] <- AIC(clogit_model)
-  
-}
-
-}
-
-```
-
-
-The model with ndvi + elev + quadratic wofs05 + slope + veg_herby is the lowest on average over all the individuals (AIC = 23892.94), and will be selected for the next round.
-
-```{r}
-
-aic_df %>% group_by(model_no) %>% summarise(mean= mean(aic))
-
-```
-
-### Seventh round of step-wise model selection
-
-```{r}
-
-formula_list <- vector(mode = "list", length = 2)
-
-#### FORMULA 1 ####
-
-formula_list[[1]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-               # 
-               veg_herby +
-                month_s1:veg_herby +
-               month_s2:veg_herby +
-               month_c1:veg_herby +
-               month_c2:veg_herby +
-               # 
-               # canopy_01 +
-               # month_s1:canopy_01 +
-               # month_s2:canopy_01 +
-               # month_c1:canopy_01 +
-               # month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 2 ####
-
-formula_list[[2]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-               # 
-               veg_herby +
-                month_s1:veg_herby +
-               month_s2:veg_herby +
-               month_c1:veg_herby +
-               month_c2:veg_herby +
-               # 
-               canopy_01 +
-               month_s1:canopy_01 +
-               month_s2:canopy_01 +
-               month_c1:canopy_01 +
-               month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-```
-
-
-Looping over all individuals
-
-```{r}
-
-aic_df <- data.frame("id" = rep(unique(buffalo_all_covs$id), 
-                                each = length(formula_list)), 
-                     "model_no" = rep(1:length(formula_list), 
-                                      length(unique(buffalo_all_covs$id))),
-                     "aic" = NA)
-
-for(i in 1:length(unique(buffalo_all_covs$id))) {
-   
-subset_id <- unique(buffalo_all_covs$id)[i]
-buffalo_subset <- buffalo_all_covs %>% filter(id == subset_id)
-
-for(j in 1:length(formula_list)) {
-  
-  clogit_model <- fit_clogit(buffalo_subset, formula = formula_list[[j]])
-  print(AIC(clogit_model))
-  aic_df$aic[[(((i - 1) * length(formula_list)) + j)]] <- AIC(clogit_model)
-  
-}
-
-}
-
-```
-
-
-The model with ndvi + elev + quadratic wofs05 + slope + veg_herby + canopy (i.e. THE FULL MODEL) is the lowest on average over all the individuals (AIC = 23873.57), and will be selected.
-
-```{r}
-
-aic_df %>% group_by(model_no) %>% summarise(mean= mean(aic))
-
-```
-
-### Adding elev as a quadratic term
-
-```{r}
-
-formula_list <- vector(mode = "list", length = 2)
-
-#### FORMULA 1 ####
-
-formula_list[[1]] <- case_ ~ 
-  
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               # 
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-               # 
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-               # 
-               veg_herby +
-                month_s1:veg_herby +
-               month_s2:veg_herby +
-               month_c1:veg_herby +
-               month_c2:veg_herby +
-               # 
-               canopy_01 +
-               month_s1:canopy_01 +
-               month_s2:canopy_01 +
-               month_c1:canopy_01 +
-               month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-               
-               strata(step_id_)
-
-
-#### FORMULA 2 ####
-
-formula_list[[2]] <- case_ ~
-
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-               #
-               elev_scaled +
-               month_s1:elev_scaled +
-               month_s2:elev_scaled +
-               month_c1:elev_scaled +
-               month_c2:elev_scaled +
-
-                I(elev_scaled^2) +
-               month_s1:I(elev_scaled^2) +
-               month_s2:I(elev_scaled^2) +
-               month_c1:I(elev_scaled^2) +
-               month_c2:I(elev_scaled^2) +
-               #
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-               #
-               veg_herby +
-                month_s1:veg_herby +
-               month_s2:veg_herby +
-               month_c1:veg_herby +
-               month_c2:veg_herby +
-               #
-               canopy_01 +
-               month_s1:canopy_01 +
-               month_s2:canopy_01 +
-               month_c1:canopy_01 +
-               month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-
-               strata(step_id_)
-
-```
-
-
-Looping over all individuals
-
-```{r}
-
-aic_df <- data.frame("id" = rep(unique(buffalo_all_covs$id), 
-                                each = length(formula_list)), 
-                     "model_no" = rep(1:length(formula_list), 
-                                      length(unique(buffalo_all_covs$id))),
-                     "aic" = NA)
-
-for(i in 1:length(unique(buffalo_all_covs$id))) {
-   
-subset_id <- unique(buffalo_all_covs$id)[i]
-buffalo_subset <- buffalo_all_covs %>% filter(id == subset_id)
-
-for(j in 1:length(formula_list)) {
-  
-  clogit_model <- fit_clogit(buffalo_subset, formula = formula_list[[j]])
-  print(summary(clogit_model))
-  print(AIC(clogit_model))
-  aic_df$aic[[(((i - 1) * length(formula_list)) + j)]] <- AIC(clogit_model)
-  
-}
-
-}
-
-```
-
-The model with ndvi + elev + QUADRATIC elev + quadratic wofs05 + slope + veg_herby + canopy has the lowest AIC on average over all the individuals (AIC = 23809.55), and will be selected.
-
-```{r}
-
-aic_df %>% group_by(model_no) %>% summarise(mean= mean(aic))
-
-```
-
-
-Final model formula
-
-```{r}
-
-formula_final <- case_ ~
-
-               ndvi_temporal +
-               month_s1:ndvi_temporal +
-               month_s2:ndvi_temporal +
-               month_c1:ndvi_temporal +
-               month_c2:ndvi_temporal +
-
-               WOFS05_dist_scaled +
-               month_s1:WOFS05_dist_scaled +
-               month_s2:WOFS05_dist_scaled +
-               month_c1:WOFS05_dist_scaled +
-               month_c2:WOFS05_dist_scaled +
-
-               I(WOFS05_dist_scaled^2) +
-               month_s1:I(WOFS05_dist_scaled^2) +
-               month_s2:I(WOFS05_dist_scaled^2) +
-               month_c1:I(WOFS05_dist_scaled^2) +
-               month_c2:I(WOFS05_dist_scaled^2) +
-
-               # elev_scaled +
-               # month_s1:elev_scaled +
-               # month_s2:elev_scaled +
-               # month_c1:elev_scaled +
-               # month_c2:elev_scaled +
-               # 
-               # I(elev_scaled^2) +
-               # month_s1:I(elev_scaled^2) +
-               # month_s2:I(elev_scaled^2) +
-               # month_c1:I(elev_scaled^2) +
-               # month_c2:I(elev_scaled^2) +
-
-               slope_scaled +
-               month_s1:slope_scaled +
-               month_s2:slope_scaled +
-               month_c1:slope_scaled +
-               month_c2:slope_scaled +
-
-               veg_herby +
-                month_s1:veg_herby +
-               month_s2:veg_herby +
-               month_c1:veg_herby +
-               month_c2:veg_herby +
-
-               canopy_01 +
-               month_s1:canopy_01 +
-               month_s2:canopy_01 +
-               month_c1:canopy_01 +
-               month_c2:canopy_01 +
-
-               log_sl_ +
-               month_s1:log_sl_ +
-               month_s2:log_sl_ +
-               month_c1:log_sl_ +
-               month_c2:log_sl_ +
-
-               cos_ta_ +
-               month_s1:cos_ta_ +
-               month_s2:cos_ta_ +
-               month_c1:cos_ta_ +
-               month_c2:cos_ta_ +
-
-               strata(step_id_)
-
-```
-
-
-Get final model objects
 
 ```{r}
 
 clogit_model_list <- list()
 
-for(i in 1:length(unique(buffalo_all_covs$id))) {
+for(i in 1:length(unique(buffalo_CLR_year$id))) {
   
-  subset_id <- unique(buffalo_all_covs$id)[i]
-  buffalo_subset <- buffalo_all_covs %>% filter(id == subset_id)
+  subset_id <- unique(buffalo_CLR_year$id)[i]
+  buffalo_subset <- buffalo_CLR %>% filter(id == subset_id)
 
-  clogit_model_list[[i]] <- fit_clogit(buffalo_subset, formula = formula_final)
+  clogit_model_list[[i]] <- fit_clogit(buffalo_subset, formula = formula_clr)
   # print(summary(clogit_model))
   # print(AIC(clogit_model))
 
 }
 
-for(i in 1:14) print(clogit_model_list[[i]])
+summary(clogit_model_list[[1]])
 
-clogit_model_list[[1]]
+# save(clogit_model_list, file = "workspace images/clr_models_ndvi_slope_canopy_herby_2_harmonics_20230209.rds")
 
 ```
 
@@ -2795,40 +307,78 @@ clogit_model_list[[1]]
 
 ```{r}
 
-# clogit_model$model$var
-# 
-# clogit_summary <- summary(clogit_model)
-# clogit_summary$coefficients
-# clogit_summary$conf.int[,3:4]
-# clogit_model$model$var
+for(i in 1:10) print(summary(clr_models[[i]]))
 
-# sqrt(nrow(buffalo_all_covs %>% filter(id == 2014)))
+```
 
-coefs_df <- data.frame("index" = 1:length(clogit_model$model$coefficients), "coef" = names(clogit_model$model$coefficients), "value" = clogit_model$model$coefficients)
+
+
+```{r}
+
+# coefs_df <- data.frame("index" = 1:length(clogit_model_list[[1]]$model$coefficients), 
+#                        "coef" = names(clogit_model_list[[1]]$model$coefficients), 
+#                        "value" = clogit_model_list[[1]]$model$coefficients)
 
 
 coefs_df_function <- function(clogit_model) {
   
-  return(data.frame("index" = 1:length(clogit_model$model$coefficients), "coef" = names(clogit_model$model$coefficients), "value" = clogit_model$model$coefficients, "se" = sqrt(diag(clogit_model$model$var))))
-  
+  return(data.frame("index" = 1:length(clogit_model$model$coefficients), 
+                    "coef" = names(clogit_model$model$coefficients), 
+                    "value" = clogit_model$model$coefficients, 
+                    "se" = sqrt(diag(clogit_model$model$var)),
+                    "weight" = 1/diag(clogit_model$model$var)))
 }
 
 clogit_model_coef_list <- map(clogit_model_list, coefs_df_function)
 
-buffalo_ids <- unique(buffalo_all_covs$id)
+buffalo_ids <- unique(buffalo_CLR_year$id)
 
 clogit_coefs <- do.call(rbind, clogit_model_coef_list)
-clogit_coefs$id <- rep(buffalo_ids, each = 40)
+clogit_coefs$id <- rep(buffalo_ids, each = length(clogit_model_list[[1]]$model$coefficients))
 clogit_coefs
 
-clogit_coefs <- clogit_coefs %>% mutate(weight = 1/se^2)
+# clogit_coefs <- clogit_coefs %>% mutate(weight = 1/se^2) # does the same as above
 
-clogit_coefs %>% filter(coef == "ndvi_temporal")
+# clogit_coefs %>% filter(coef == "ndvi_temporal")
+clogit_coefs %>% filter(coef == "ndvi_scaled")
+clogit_coefs %>% filter(coef == "slope_scaled")
 
-mean(x = ndvi_lin_df$coefs)
-weighted.mean(x = ndvi_lin_df$coefs, w = ndvi_lin_df$weights)
+# mean(x = ndvi_lin_df$coefs)
+# weighted.mean(x = ndvi_lin_df$coefs, w = ndvi_lin_df$weights)
+# 
+# pivot_longer(clogit_coefs, cols = coef, names_to = c("coef", "se"))
 
-pivot_longer(clogit_coefs, cols = coef) #, names_to = c("coef", "se"))
+```
+
+Calculating WEIGHTED arithmetic mean coefficient values across months 
+
+Loop to calculate means and weighted means 
+
+```{r}
+
+coef <- c()
+mean <- c()
+w_mean <- c()
+
+for(i in 1:length(unique(clogit_coefs$coef))) {
+  
+  # i <- 1
+  
+  coef_i <- unique(clogit_coefs$coef)[i]
+
+  coef <- c(coef, coef_i)
+  
+  mean <- c(mean, 
+            mean(x = clogit_coefs[which(clogit_coefs$coef == coef_i),]$value))
+  
+  w_mean <- c(w_mean, 
+            weighted.mean(x = clogit_coefs[which(clogit_coefs$coef == coef_i),]$value,
+              w = clogit_coefs[which(clogit_coefs$coef == coef_i),]$weight))
+
+}
+
+clogit_weighted_means <- data.frame(coef, mean, w_mean)
+clogit_weighted_means
 
 ```
 
@@ -2836,7 +386,7 @@ pivot_longer(clogit_coefs, cols = coef) #, names_to = c("coef", "se"))
 
 ```{r}
 
-clogit_coef_df <- clogit_model_coef_list[[1]]
+# clogit_coef_df <- clogit_model_coef_list[[1]]
 
 x_month <- seq(0, 12, 0.1)
 
@@ -2860,27 +410,35 @@ harmonic_coefs_function <- function(clogit_coef_df) {
 
 y_ndvi_month <- map_dbl(x_month,
              y_month,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_c2")])
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:month_c2")])
 
-y_wofs05_month <- map_dbl(x_month,
-             y_month,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_c2")])
+# y_ndvi_month <- map_dbl(x_month,
+#              y_month,
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_s1")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_s2")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_c1")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_c2")])
 
-y_wofs05_Q_month <- map_dbl(x_month,
-             y_month,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2)")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_c2")])
+# y_wofs05_month <- map_dbl(x_month,
+#              y_month,
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_s1")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_s2")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_c1")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_c2")])
+# 
+# y_wofs05_Q_month <- map_dbl(x_month,
+#              y_month,
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2)")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_s1")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_s2")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_c1")],
+#              clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_c2")])
 
 y_slope_month <- map_dbl(x_month,
              y_month,
@@ -2900,47 +458,163 @@ y_herby_month <- map_dbl(x_month,
 
 y_canopy <- map_dbl(x_month,
              y_month,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_01")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_01:month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_01:month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_01:month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_01:month_c2")])
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:month_c2")])
+
+y_sl <- map_dbl(x_month,
+             y_month,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:month_c2")])
 
 y_log_sl <- map_dbl(x_month,
              y_month,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl_")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl_:month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl_:month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl_:month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl_:month_c2")])
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:month_c2")])
 
 y_cos_ta <- map_dbl(x_month,
              y_month,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta_")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta_:month_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta_:month_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta_:month_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta_:month_c2")])
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:month_c2")])
 
-return(data.frame("ndvi" = y_ndvi_month, 
-                  "wofs05" = y_wofs05_month, 
-                  "wofs05_Q" = y_wofs05_Q_month, 
-                  "slope" = y_slope_month, 
-                  "herby" = y_herby_month, 
-                  "canopy" = y_canopy, 
-                  "log_sl" = y_log_sl, 
-                  "cos_ta" = y_cos_ta))
+return(data.frame("NDVI" = y_ndvi_month, 
+                  # "wofs05" = y_wofs05_month, 
+                  # "wofs05_Q" = y_wofs05_Q_month, 
+                  "Slope" = y_slope_month, 
+                  "Herbaceous_vegetation" = y_herby_month, 
+                  "Canopy_cover" = y_canopy, 
+                  "Step_length" = y_sl,
+                  "log_Step_length" = y_log_sl, 
+                  "cos_Turning_angle" = y_cos_ta))
 
 }
 
-
+# testing to see if the function works
 harmonic_coefs_function(clogit_model_coef_list[[3]])
 
+# mapping over the function
 harmonic_coefs_list <- map(clogit_model_coef_list, harmonic_coefs_function)
+# unlisting
+harmonic_coef_prebind <- do.call(rbind, harmonic_coefs_list)
 
-harmonic_coefs_df <- cbind("id" = rep(buffalo_ids, each = 121), "month" = x_month, do.call(rbind, harmonic_coefs_list))
+# using the function on the weighted mean of the coefficients - creating a value column
+clogit_weighted_means <- clogit_weighted_means %>% mutate(value = w_mean)
+clogit_means <- clogit_weighted_means %>% mutate(value = mean)
+# running the function
+harmonic_weighted_mean <- harmonic_coefs_function(clogit_weighted_means)
+harmonic_mean <- harmonic_coefs_function(clogit_means)
 
+# binding the ID and weighted mean values
+harmonic_coef_vals_w_mean <- rbind(harmonic_coef_prebind, harmonic_weighted_mean, harmonic_mean)
+
+# combining
+harmonic_coefs_df <- cbind("id" = rep(c(buffalo_ids, "Weighted mean", "Mean"), each = 121), 
+                           "month" = x_month, harmonic_coef_vals_w_mean)
+
+```
+
+
+Reconstructing the Gamma and von Mises distributions from the tentative distributions (from Fieberg et al 2021: Appendix C)
+
+```{r}
+
+# for individuals
+# movement_parameters <- read_csv("outputs/buffalo_parametric_indv_movement_params_20230208.csv")
+# movement_parameters_year <- movement_parameters %>% filter(id %in% buffalo_year_ids)
+
+# for the population
+# gamma$params$shape # 0.438167
+# gamma$params$scale # 534.3507
+# vonmises$params$kappa # 0.1848126
+
+tentative_shape <- 0.438167
+tentative_scale <- 534.3507
+tentative_kappa <- 0.1848126
+
+harmonic_coefs_df <- harmonic_coefs_df %>% mutate(shape = tentative_shape + log_Step_length,
+                             scale = 1/((1/tentative_scale) - Step_length),
+                             kappa = tentative_kappa + cos_Turning_angle)
+
+# write_csv(harmonic_coefs_df, "outputs/harmonic_coefs_wide_with_movement_params_20230210.csv")
+
+# turning into a long data frame
 harmonic_coefs <- pivot_longer(harmonic_coefs_df, cols = !1:2, names_to = "coef")
+
+# write_csv(harmonic_coefs, "outputs/harmonic_coefs_long_with_movement_params_20230209.csv")
+
+```
+
+
+```{r}
+
+x <- seq(0,500,1)
+
+# step length distribution
+plot(x, dgamma(x, 
+       shape = harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% 
+         dplyr::filter(coef == "shape") %>% dplyr::pull(value),
+       scale = harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% 
+         dplyr::filter(coef == "scale") %>% dplyr::pull(value)),
+     type = "l",
+     main = "Step length distribution",
+     xlab = "Distance (m)",
+     ylab = "Density")
+
+xvm <- seq(-pi, pi, 0.01)
+
+plot(xvm, dvonmises(xvm, 
+          mu = 0, 
+          kappa = harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% 
+            dplyr::filter(coef == "kappa") %>% dplyr::pull(value),
+          log = FALSE),
+     type = "l",
+     main = "Turning angle distribution",
+     xlab = "Turning angle (rad)",
+     ylab = "Density",
+     ylim = c(0,0.21))
+
+
+```
+
+```{r}
+
+n <- 1e5
+
+shape <- harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% dplyr::filter(coef == "shape") %>% dplyr::pull(value)
+scale <- harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% dplyr::filter(coef == "scale") %>% dplyr::pull(value)
+kappa <- harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% dplyr::filter(coef == "kappa") %>% dplyr::pull(value)
+
+sl <- rgamma(n, shape = shape, scale = scale)
+hist(sl, breaks = 100)
+ta <- as.numeric(Rfast::rvonmises(n, m = pi, k = 0.78) - pi)
+hist(ta, breaks = 100)
+
+x_s <- sl * sin(ta)
+y_s <- sl * cos(ta)
+xy_mk <- data.frame("x_pos" = x_s, "y_pos" = y_s)
+
+ggplot(data = xy_mk, aes(x = x_pos, y = y_pos)) +
+  geom_point(alpha = 0.1) +
+  # geom_density_2d_filled(data = xy_mk, aes(x = x_pos, y = y_pos)) +
+  # geom_hex(bins = 30) +
+  # geom_bin_2d(bins = 50) +
+  scale_x_continuous("x position") +
+  scale_y_continuous("y position") +
+  # scale_fill_viridis_c() +
+  geom_point(aes(x = 0, y = 0), colour = "red", alpha = 0.25) +
+  coord_equal() +
+  theme_bw()
 
 ```
 
@@ -2948,146 +622,278 @@ harmonic_coefs <- pivot_longer(harmonic_coefs_df, cols = !1:2, names_to = "coef"
 
 ```{r}
 
-hist(buffalo_all_covs$ta_, breaks = 50)
-hist(buffalo_all_covs$cos_ta_, breaks = 50)
+# write_csv(harmonics_coefs, "outputs/monthly_CLR_coefs_long_with_movement_params_20230228.csv")
+# harmonics_coefs <- read_csv("outputs/monthly_CLR_coefs_long_with_movement_params_20230228.csv")
 
-cos(-pi/2)
-
-ggplot() +
-  geom_point(data = harmonic_coefs %>% filter(coef != "wofs05" & coef != "wofs05_Q"), aes(x = month, y = value, colour = coef)) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  theme_bw()
-
-ggplot() +
-  geom_point(data = harmonic_coefs %>% filter(coef == "ndvi"), aes(x = month, y = value, colour = factor(id))) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  theme_bw()
+# ggplot() +
+#   geom_point(data = harmonic_coefs, aes(x = month, y = value, colour = coef)) +
+#   geom_hline(yintercept = 0, linetype = "dashed") +
+#   theme_bw()
+# 
+# ggplot() +
+#   geom_point(data = harmonic_coefs %>% filter(coef == "ndvi"), aes(x = month, y = value, colour = factor(id))) +
+#   geom_hline(yintercept = 0, linetype = "dashed") +
+#   theme_bw()
+# 
+# unique(harmonic_coefs$id)[1:10]
 
 coefs <- unique(harmonic_coefs$coef)
-
+coef_titles <- c("NDVI", "Slope", "Herbaceous vegetation", "Canopy cover", "Step length", "log(Step length)", "cos(Turning angle)")
 
 for(i in 1:length(coefs)) {
   
   gg <- ggplot() +
-  geom_point(data = harmonic_coefs %>% filter(coef == coefs[i]), aes(x = month, y = value, colour = factor(id))) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-    ggtitle(coefs[i]) +
-  theme_bw()
+  geom_line(data = harmonic_coefs %>% 
+              filter(id %in% unique(harmonic_coefs$id)[1:10]) %>% 
+              filter(coef %in% unique(harmonic_coefs$coef)[1:7]) %>% 
+              filter(coef == coefs[i]), 
+            aes(x = month, y = value, group = id), colour = "grey") + # , colour = factor(id)
+    geom_line(data = harmonic_coefs %>% filter(id %in% unique(harmonic_coefs$id)[11:12]) %>% 
+                filter(coef == coefs[i]), aes(x = month, y = value, colour = factor(id))) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    scale_y_continuous(expression(Time-varying~parameter~values~beta)) +
+    scale_x_continuous(breaks = 0:12) +
+    scale_color_discrete("Estimate") +
+    ggtitle(coef_titles[i]) +
+    theme_classic() +
+    theme(legend.position = "bottom")
   
   print(gg)
+
+  ggsave(paste("outputs/plots/clr_fitting/clr_harmonic_20230208_", coef_titles[i], ".png", sep = ""),
+  width=150, height=90, units="mm", dpi = 300)
   
 }
 
-```
 
-
-Calculating mean coefficient values across months 
-
-```{r}
-
-harmonic_coefs_mean <- harmonic_coefs %>% dplyr::group_by(month, coef) %>% summarise(mean_coef = mean(value)) %>% dplyr::ungroup()
-
-harmonic_coefs_mean
+# with just the means 
 
 ggplot() +
-  geom_point(data = harmonic_coefs_mean, aes(x = month, y = mean_coef, colour = coef)) + # %>% filter(coef != "wofs05" & coef != "wofs05_Q")
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  theme_bw()
+    geom_path(data = harmonic_coefs %>% 
+                filter(id %in% unique(harmonic_coefs$id)[11]) %>% 
+                filter(coef %in% unique(harmonic_coefs$coef)[1:7]), 
+              aes(x = month, y = value, colour = coef)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    scale_y_continuous(expression(Time-varying~parameter~values~beta)) +
+    scale_x_continuous("Month", breaks = 0:12) +
+    scale_color_discrete("Estimate") +
+    # ggtitle(coef_titles[i]) +
+    theme_classic() +
+    theme(legend.position = "bottom")
+
+ggsave(paste("outputs/plots/clr_fitting/clr_harmonic_all_20230208.png", sep = ""),
+  width=150, height=90, units="mm", dpi = 300)
+ggsave(paste("outputs/plots/clr_fitting/clr_harmonic_all_pres_20230208.png", sep = ""),
+  width=300, height=180, units="mm", dpi = 300)
+
 
 ggplot() +
-  geom_point(data = harmonic_coefs_mean %>% filter(coef != "wofs05" & coef != "wofs05_Q"), aes(x = month, y = mean_coef, colour = coef)) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  theme_bw()
+    geom_path(data = harmonic_coefs %>% 
+                filter(id %in% unique(harmonic_coefs$id)[11]) %>% 
+                filter(coef %in% unique(harmonic_coefs$coef)[8:10]), 
+              aes(x = month, y = value, colour = coef)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    scale_y_continuous(expression(beta)) +
+    scale_x_continuous(breaks = 0:12) +
+    scale_color_discrete("Estimate") +
+    # ggtitle(coef_titles[i]) +
+    theme_classic() +
+    theme(legend.position = "bottom")
+
 
 ggplot() +
-  geom_point(data = harmonic_coefs_mean %>% filter(coef != "ndvi" & coef != "wofs05" & coef != "wofs05_Q"), aes(x = month, y = mean_coef, colour = coef)) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  theme_bw()
+    geom_path(data = harmonic_coefs %>% 
+                filter(id %in% unique(harmonic_coefs$id)[11]) %>% 
+                filter(coef %in% unique(harmonic_coefs$coef)[c(8,10)]), 
+              aes(x = month, y = value, colour = coef)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    scale_y_continuous(expression(beta)) +
+    scale_x_continuous(breaks = 0:12) +
+    scale_color_discrete("Estimate") +
+    # ggtitle(coef_titles[i]) +
+    theme_classic() +
+    theme(legend.position = "bottom")
 
-```
-
-
-Calculating WEIGHTED arithmetic mean coefficient values across months 
-
-```{r}
-
-harmonic_coefs_mean <- harmonic_coefs %>% dplyr::group_by(month, coef) %>% summarise(mean_coef = mean(value)) %>% dplyr::ungroup()
-
-harmonic_coefs_mean
-
-ggplot() +
-  geom_point(data = harmonic_coefs_mean, aes(x = month, y = mean_coef, colour = coef)) + # %>% filter(coef != "wofs05" & coef != "wofs05_Q")
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  theme_bw()
-
-ggplot() +
-  geom_point(data = harmonic_coefs_mean %>% filter(coef != "wofs05" & coef != "wofs05_Q"), aes(x = month, y = mean_coef, colour = coef)) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  theme_bw()
-
-ggplot() +
-  geom_point(data = harmonic_coefs_mean %>% filter(coef != "ndvi" & coef != "wofs05" & coef != "wofs05_Q"), aes(x = month, y = mean_coef, colour = coef)) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  theme_bw()
-
-```
-
-
-
-```{r}
-
-# par(mfrow = c(1,2))
-
-plot(x_month, y_ndvi_month, type = "l") 
-abline(h = 0, lty = "dashed")
-
-plot(x_month, y_wofs05_month, type = "l")
-abline(h = 0, lty = "dashed")
-
-plot(x_month, y_wofs05_Q_month, type = "l")
-abline(h = 0, lty = "dashed")
-
-plot(x_month, y_slope_month, type = "l")
-abline(h = 0, lty = "dashed")
-
-plot(x_month, y_herby_month, type = "l")
-abline(h = 0, lty = "dashed")
-
-plot(x_month, y_canopy, type = "l")
-abline(h = 0, lty = "dashed")
-
-
-par(mfrow = c(1,1))
+harmonic_coefs %>% filter(id %in% unique(harmonic_coefs$id)[11])
 
 ```
 
 
+```{r}
+
+x <- seq(0, 1000, length = 500)
+dgamma(x, shape = tentative_shape, scale = tentative_scale)
+
+temporal_movement_params <- harmonic_coefs_df %>% filter(id == "Weighted mean") %>% dplyr::select(c("month", "shape", "scale", "kappa"))
+# write_csv(temporal_movement_params, "outputs/temporal_movement_params_CLR_20230210.csv")
+
+ggplot() +
+  stat_function(fun = dgamma, args = list(shape = tentative_shape, scale = tentative_scale)) +
+  scale_x_continuous(limits = c(0,1000), breaks = seq(0,1000,100)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_classic()
+
+
+subset <- temporal_movement_params %>% filter(month < 1)
+
+ggplot(subset) +
+  stat_function(fun = dgamma, args = list(shape = shape, scale = scale)) +
+  scale_x_continuous(limits = c(0,1000), breaks = seq(0,1000,100)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_classic()
+
+```
+
+
+# Generating predictions
+
+Importing habitat layers
 
 ```{r}
 
-# for a single individual
-y_wofs05_month[seq(1, 111, 10)]
-y_wofs05_Q_month[seq(1, 111, 10)]
+# ndvi_projected <- rast("mapping/cropped rasters/ndvi_GEE_projected_watermask20230207.tif")
+# plot(ndvi_projected[ndvi_projected > 0])
+# 
+# for(i in 1:nlyr(ndvi_projected)) {
+#   ndvi_projected[[i]] <- ndvi_projected[[i]]
+# }
+# 
+# hist(buffalo_CLR$ndvi_temporal, breaks = 100)
+# 
+# # terra::set.values(ndvi_projected, < 0, NA)
+# ndvi_above_0 <- ifel(ndvi_projected < 0, NA, ndvi_projected)
+# plot(ndvi_above_0)
+# 
+# # scaling ndvi by a single month
+# 
+# plot(ndvi_projected[[16]])
+# plot(ndvi_projected[[16]] < 0)
+# 
+# # ndvi_july2018_scaled <- scale(ndvi_projected[[7]])
+# # plot(ndvi_july2018_scaled)
+# # 
+# # scaling_mean <- mean(values(ndvi_projected[[7]], na.rm = TRUE)) # 0.4054526 for July 2018
+# # scaling_sd <- sd(values(ndvi_projected[[7]], na.rm = TRUE)) # 0.1113644 for July 2018
+# # 
+# # ndvi_stack_scaled <- (ndvi_projected - mean(values(ndvi_projected[[7]], na.rm = TRUE))) / sd(values(ndvi_projected[[7]], na.rm = TRUE))
+# # plot(ndvi_stack_scaled)
+# ndvi_stack_scaled <- (ndvi_above_0 - mean(values(ndvi_projected[[7]], na.rm = TRUE))) / sd(values(ndvi_projected[[7]], na.rm = TRUE))
+# plot(ndvi_stack_scaled)
 
-for(i in 1:12){
-x <- buffalo_subset$WOFS05_dist_scaled
-y <- x * y_wofs05_month[seq(1, 111, 10)][i] + x^2 * y_wofs05_Q_month[seq(1, 111, 10)][i]
-print(plot(x, y))
-}
-
-plot(x, y)
-plot(x, y, xlim = c(-0.5, 0.5))
+# ndvi_above0_stack_scaled <- ndvi_stack_scaled
+# terra::writeRaster(ndvi_above0_stack_scaled, "mapping/cropped rasters/ndvi_above0_stack_scaled_20230210.tif")
+ndvi_above0_stack_scaled <- rast("mapping/cropped rasters/ndvi_above0_stack_scaled_20230210.tif")
 
 
-# for the mean of all individuals
-x_term <- harmonic_coefs_mean[which(harmonic_coefs_mean$coef == "wofs05"),]$mean_coef[seq(1, 111, 10)]
-x2_term <- harmonic_coefs_mean[which(harmonic_coefs_mean$coef == "wofs05_Q"),]$mean_coef[seq(1, 111, 10)]
+```
 
-for(i in 1:12){
-x <- buffalo_subset$WOFS05_dist_scaled
-y <- x * x_term[i] + x^2 * x2_term[i]
-print(plot(x, y))
-}
+```{r}
+
+# elev <- raster("mapping/cropped rasters/DEM_H_raster.tif")
+# slope <- raster("mapping/cropped rasters/slope_raster.tif")
+# veg_herby <- raster("mapping/cropped rasters/veg_herby.tif")
+# canopy_cover <- raster("mapping/cropped rasters/canopy_cover.tif")
+# 
+# names(elev) <- "elev"
+# names(slope) <- "slope"
+# names(veg_herby) <- "veg_herby"
+# names(canopy_cover) <- "canopy_cover"
+
+```
+
+For plotting with terra 
+
+```{r}
+
+# elev <- rast("mapping/cropped rasters/DEM_H_raster.tif")
+slope <- rast("mapping/cropped rasters/slope_raster.tif")
+veg_herby <- rast("mapping/cropped rasters/veg_herby.tif")
+canopy_cover <- rast("mapping/cropped rasters/canopy_cover.tif")
+# 
+# ndvi_july2018 <- ndvi_projected[[7]]
+# 
+# names(slope) <- "Slope"
+# names(veg_herby) <- "Herbaceous vegetation"
+# names(canopy_cover) <- "Canopy cover"
+# names(ndvi_july2018) <- "NDVI July 2018"
+# 
+# # plot(elev)
+# plot(slope)
+# plot(veg_herby)
+# plot(canopy_cover)
+# plot(ndvi_july2018)
+# 
+# plot_stack <- c(ndvi_july2018, slope, veg_herby, canopy_cover)
+# 
+# png(filename = "outputs/plots/ndvi_slope_herb_canopy_layers_20230208.png",
+#     width = 300, height = 175, units = "mm", res = 300)
+# plot(plot_stack)
+# dev.off()
+
+```
+
+Scaling rasters
+
+```{r}
+
+# hist(buffalo_CLR_year$slope_scaled)
+# slope_scaled <- (slope - attr(buffalo_CLR_year$slope_scaled, "scaled:center")) / attr(buffalo_CLR_year$slope_scaled, "scaled:scale")
+# plot(slope_scaled)
+# 
+# writeRaster(slope_scaled, "mapping/cropped rasters/slope_scaled_by_buffalo_data_20230210.tif")
+slope_scaled <- rast("mapping/cropped rasters/slope_scaled_by_buffalo_data_20230210.tif")
+
+# hist(buffalo_CLR_year$canopy_scaled)
+# canopy_scaled <- ((canopy_cover / 100) - attr(buffalo_CLR_year$canopy_scaled, "scaled:center")) / attr(buffalo_CLR_year$canopy_scaled, "scaled:scale")
+# plot(canopy_scaled)
+# 
+# writeRaster(canopy_scaled, "mapping/cropped rasters/canopy_scaled_by_buffalo_data_20230210.tif")
+canopy_scaled <- rast("mapping/cropped rasters/canopy_scaled_by_buffalo_data_20230210.tif")
+
+```
+
+
+Checking distributions of covariates vs used and random locations
+
+```{r}
+
+ndvi_values_month1 <- values(ndvi_above0_stack_scaled[[13]])
+canopy_values <- values(canopy_cover)
+slope_values <- values(slope_scaled)
+herby_values <- values(veg_herby)
+
+enviro_values <- data.frame("Data" = rep("Environmental", length(values(canopy_cover))), "pres" = rep(1, length(values(canopy_cover))),  "ndvi" = ndvi_values_month1, "canopy" = canopy_values, "slope" = slope_values, "herby" = herby_values)
+names(enviro_values) <- c("Data", "pres", "ndvi", "canopy", "slope", "herby")
+
+buffalo_pres_values <- buffalo_CLR_year %>% filter(y == 1 & year == 2019 & month == 3) %>%  transmute(Data = "Presence", pres = y, ndvi = ndvi_temporal, canopy = canopy_cover, slope = slope_end, herby = veg_herby)
+
+buffalo_background_values <- buffalo_CLR_year %>% filter(y == 0 & year == 2019 & month == 3) %>%  transmute(Data = "Random steps", pres = y, ndvi = ndvi_temporal, canopy = canopy_cover, slope = slope_end, herby = veg_herby)
+
+enviro_buffalo_values <- rbind(enviro_values, buffalo_pres_values, buffalo_background_values)
+
+# ggplot(enviro_buffalo_values) +
+#   geom_density(aes(x = ndvi, fill = method), alpha = 0.5) +
+#   geom_density(data = buffalo_CLR_year %>% filter(y == 1, year == 2019 & month == 1), 
+#                aes(x = ndvi_temporal), fill = "orange", alpha = 0.5) +
+#   geom_density(data = buffalo_CLR_year %>% filter(y == 0, year == 2019 & month == 1), 
+#                aes(x = ndvi_temporal), linetype = "dashed", colour = "red", alpha = 0.5) +
+#   theme_classic()
+
+ggplot() +
+  geom_density(data = enviro_buffalo_values, aes(x = ndvi, fill = Data), alpha = 0.25) +
+  theme_classic()
+
+ggplot() +
+  geom_density(data = enviro_buffalo_values, aes(x = slope, fill = Data), alpha = 0.25) +
+  theme_classic()
+
+
+tab <- as.data.frame(prop.table(table(enviro_buffalo_values$canopy, enviro_buffalo_values$Data), 2))
+names(tab) <- c("Canopy_cover", "Data", "Freq")
+
+ggplot(data = tab, aes(x = Canopy_cover, y = Freq, fill = Data)) +
+  geom_bar(stat = "identity", position = position_dodge(), alpha = 0.75) +
+  theme_classic()
 
 ```
 
@@ -3098,27 +904,35 @@ print(plot(x, y))
 
 years <- c(rep(2019, 7), rep(2018, 5))
 months <- c(seq(1, 7, 1), seq(8, 12, 1))
-day <- rep(15, 12)
+day <- rep(1, 12)
 dates <- make_datetime(year = years, month = months, day = day, tz = "Australia/Queensland")
 
-# seq(1, 111, 10)
+# temp_coefs <- data.frame("date" = dates, 
+#                          "ndvi" = harmonic_weighted_mean$NDVI[seq(1, 111, 10)], 
+#                          "slope" = harmonic_weighted_mean$Slope[seq(1, 111, 10)], 
+#                          "veg_herby" = harmonic_weighted_mean$Herbaceous_vegetation[seq(1, 111, 10)], 
+#                          "canopy" = harmonic_weighted_mean$Canopy_cover[seq(1, 111, 10)])
 
-temp_coefs <- data.frame("date" = dates, 
-                         "ndvi" = y_ndvi_month[seq(1, 111, 10)], 
-                         "ndwi" = y_ndwi_month[seq(1, 111, 10)], 
-                         "veg_herby" = y_veg_herby[seq(1, 111, 10)], 
-                         "canopy" = y_canopy[seq(1, 111, 10)])
+monthly_coefs <- data.frame("date" = dates,
+                         "ndvi" = harmonic_weighted_mean$NDVI[seq(1, 111, 10)],
+                         "slope" = harmonic_weighted_mean$Slope[seq(1, 111, 10)],
+                         "veg_herby" = harmonic_weighted_mean$Herbaceous_vegetation[seq(1, 111, 10)],
+                         "canopy" = harmonic_weighted_mean$Canopy_cover[seq(1, 111, 10)],
+                         "shape" = harmonic_weighted_mean$shape[seq(1, 111, 10)],
+                         "scale" = harmonic_weighted_mean$scale[seq(1, 111, 10)],
+                         "kappa" = harmonic_weighted_mean$kappa[seq(1, 111, 10)])
 
+write_csv(monthly_coefs, "outputs/monthly_CLR_coefs_wide_with_movement_params_20230210.csv") # weighted mean
 
-temp_coefs_long <- temp_coefs %>% pivot_longer(cols = !date)
+monthly_coefs_long <- monthly_coefs %>% pivot_longer(cols = !date)
 
 # sanity check to ensure that the coefficients line up to the correct months
-temp_coefs_long %>% ggplot(aes(x = month(date), y = value, colour = factor(name))) +
+monthly_coefs_long %>% filter(!name %in% c("shape", "scale", "kappa")) %>% ggplot(aes(x = month(date), y = value, colour = factor(name))) +
   geom_line() +
   scale_colour_viridis_d("Covariate") +
   geom_hline(yintercept = 0, linetype = "dashed") +
-  scale_x_continuous(breaks = seq(1,12,1)) +
-  theme_bw()
+  scale_x_continuous(breaks = 1:12) +
+  theme_classic()
 
 ```
 
@@ -3142,59 +956,371 @@ temp_coefs_long %>% ggplot(aes(x = month(date), y = value, colour = factor(name)
 
 
 
-```{r}
-
-years <- c(rep(2018, 5), rep(2019, 7))
-months <- c(seq(8, 12, 1), seq(1, 7, 1))
-day <- rep(15, 12)
-dates <- make_datetime(year = years, month = months, day = day, tz = "Australia/Queensland")
-
-```
-
-
-
 ```{r temporal naive}
 
-temp_coefs <- data.frame("date" = dates, 
-                         "ndvi" = y_ndvi_month, 
-                         "ndwi" = y_ndwi_month, 
-                         "veg_herby" = y_veg_herby, 
-                         "canopy" = y_canopy)
-                         # "veg_herby" = rep(clogit_model$model$coefficients[3], 12), 
-                         # "canopy" = rep(clogit_model$model$coefficients[4], 12)
-
-layers <- stack()
+layers_naive <- c()
 
 for(i in 1:12) {
 
-resources <- raster::stack(ndvi_raster_amt[[which(getZ(ndvi_raster_waterNA) == temp_coefs$date[i])]], 
-                           ndwi_raster_amt[[which(getZ(ndwi_raster_waterNA) == temp_coefs$date[i])]], 
-                           veg_herby, 
-                           canopy_01)
+resources <- c(ndvi_stack_scaled[[which(time(ndvi_stack_scaled) == temp_coefs$date[i])]], 
+               slope_scaled,
+               veg_herby, 
+               canopy_scaled)
 
+# plot(resources)
 # extent(resources) <- c(0, 60000, 0, 57000)
 
-naive <- raster(resources)
-naive <- raster::setValues(naive, 0)
+naive <- rast(resources)[[1]]
+naive <- terra::setValues(naive, 0)
+names(naive) <- "naive_predictions"
   
 for (j in 1:4) {
   naive <- naive + temp_coefs[i,][[j + 1]] * resources[[j]]
 }
   
-naive_norm <- exp(naive)/cellStats(exp(naive), stat = "sum")
-layers <- stack(layers, naive_norm)
+naive_norm <- exp(naive)/global(exp(naive), fun = "sum", na.rm = TRUE)[[1]]
+terra::plot(naive_norm)
+layers_naive <- c(layers_naive, naive_norm)
 
 }
 
-layers <- mask(layers, water, maskvalue = 1)
+naive_predictions <- rast(layers_naive)
+plot(naive_predictions)
+
+# layers <- mask(layers, water, maskvalue = 1)
 # raster::plot(layers, col = brewer.pal(9, "Reds"), main = dates)
 
-# for(i in 1:nlayers(layers)) plot(layers[[i]], main = dates[[i]])
+time(naive_predictions) <- dates
+time(naive_predictions) 
 
-layers <- raster::setZ(layers, dates)
-getZ(layers) 
+for(i in 1:12) (plot(naive_predictions[[i]], main = time(naive_predictions[[i]])))
 
 ```
+
+
+Changing to a 0 to 1 scale. 
+
+```{r}
+
+naive_predictions_01_list <- c()
+
+for(i in 1:12) {
+  naive_predictions_01[[i]] <- (naive_predictions[[i]] - global(naive_predictions[[i]], fun = "min", na.rm = TRUE)[[1]]) / 
+    (global(naive_predictions[[i]], fun = "max", na.rm = TRUE)[[1]] - global(naive_predictions[[i]], fun = "min", na.rm = TRUE)[[1]]) }
+
+naive_predictions_01 <- rast(naive_predictions_01_list)
+plot(naive_predictions_01)
+
+for(i in 1:12) (plot(naive_predictions_01[[i]], main = time(naive_predictions_01[[i]])))
+
+```
+
+
+Naive predictions in ggplot
+
+```{r}
+
+naive_layer_dfs <- vector(mode = "list", length = nlyr(naive_predictions))
+
+for(i in 1:nlyr(naive_predictions)) {
+  naive_layer_dfs[[i]] <- as.data.frame(naive_predictions[[i]], xy = TRUE)
+}
+
+# to set fill limits so they're all on the same probability scale
+
+mins <- numeric()
+maxs <- numeric()
+for(i in 1:12) mins[i] <- min(naive_layer_dfs[[i]]$naive_predictions, na.rm = TRUE)
+for(i in 1:12) maxs[i] <- max(naive_layer_dfs[[i]]$naive_predictions, na.rm = TRUE)
+min(mins)
+max(maxs)
+
+buffalo_year <- buffalo_CLR_year %>% filter(t1 > as.POSIXct("2018-08-01 00:00:00", tz = "UTC")) %>% 
+  filter(t1 < as.POSIXct("2019-08-01 00:00:00", tz = "UTC"))
+
+months <- month(time(naive_predictions)) # as 1:12 probably don't need to use the subset
+
+for(i in 1:12) {
+  
+  # i = 1
+
+ggplot() +
+  geom_raster(data = naive_layer_dfs[[i]], 
+              aes(x = x, y = y, fill = naive_layer_dfs[[i]][,3])) + # naive_norm_df[,i + 2]
+  scale_fill_viridis_c("Habitat suitability", direction = 1, 
+                       option = "D", limits = c(0.000000008812208, 0.0000004827002)) +
+    geom_point(data = buffalo_year %>% filter(month == i & y == 1), 
+               aes(x = x1, y = y1), size = 0.1, colour = "red", alpha = 0.25) +
+  # scale_fill_gradient(low = "white", high = "purple") +
+  # scale_fill_distiller("Habitat suitability", palette = "RdYlBu") +
+  # ggthemes::scale_fill_te
+  coord_equal() +
+  # facet_wrap(facets = vars(month)) +
+  # transition_states(month, transition_length = 3, state_length = 1)
+  ggtitle(paste("Naive approach", time(naive_predictions_01[[i]]), sep = " ")) +
+  theme_bw() +
+  theme(legend.position = "right", legend.key.width = unit(1, "cm"))
+
+ggsave(filename = paste("outputs/plots/naive_monthly_wpoints_", time(naive_predictions[[i]]), "_20230209.png", sep = ""), width=180, height=100, units="mm", dpi = 300)
+
+}
+
+colnames(naive_layer_dfs[[1]])[3]
+
+```
+
+
+```{r}
+
+naive_comparison <- naive_predictions[[1]]
+ext(naive_comparison) <- c(0, 60000, 0, 57000)
+terra::plot(naive_comparison)
+naive_comparison_cropped <- terra::crop(naive_comparison, ext(25000, 35500, 25000, 35500))
+# ext(resources_cropped) <- c(ext(resources_cropped)[1] - ext(resources_cropped)[1], 
+#                             ext(resources_cropped)[2] - ext(resources_cropped)[1], 
+#                             ext(resources_cropped)[3] - ext(resources_cropped)[3], 
+#                             ext(resources_cropped)[4] - ext(resources_cropped)[3])
+
+terra::plot(naive_comparison_cropped)
+
+min(naive_layer_dfs[[i]]$y, na.rm = TRUE)
+
+naive_comparison_cropped_df <- as.data.frame(naive_comparison_cropped, xy = TRUE)
+
+ggplot() +
+  geom_raster(data = naive_comparison_cropped_df, 
+              aes(x = x, y = y, fill = naive_comparison_cropped_df[,3])) + # naive_norm_df[,i + 2]
+  scale_fill_viridis_c("Habitat suitability", direction = 1, 
+                       option = "D") + # , limits = c(0.000000008812208, 0.0000004827002)
+    geom_point(data = buffalo_year %>% filter(month == 1 &y == 1), 
+               aes(x = x1, y = y1 + 1462963, colour = factor(id)), size = 0.5, alpha = 0.75) + # colour = "red", 
+  coord_equal() +
+  scale_x_continuous(limits = c(30000, 35000)) +
+  scale_y_continuous(limits = c(25000, 30000)) +
+  # ggtitle(paste("Naive approach", time(naive_predictions_01[[i]]), sep = " ")) +
+  theme_bw() +
+  theme(legend.position = "right", legend.key.width = unit(1, "cm"))
+
+```
+
+
+
+```{r}
+
+# install.packages("Rfast")
+library(Rfast)
+
+# empirical_steps <- buffalo_all_covs %>% filter(y == 1) %>% .$sl_ 
+# empirical_angles <- buffalo_all_covs %>% filter(y == 1) %>% .$ta_
+# empirical_pairs <- bind_cols("steps" = empirical_steps, "angles" = empirical_angles) %>% drop_na()
+
+temporal_movement_params$shape[1]
+
+# slice_sample(empirical_pairs, n = 5, replace = T)
+
+n_steps <- 10
+n_ch <- 100
+coef <- cov_values
+xy0 <- start_unif
+resc <- resources
+
+simulate_ssf <- function(n_steps, n_ch, coef, xy0, resc) { 
+  #sl <- rexp(n_steps * n_ch, rate = l) # l = 1, add into arguments if using exponential distribution for sl
+  sl <- rgamma(n_steps * n_ch, shape = temporal_movement_params$shape[1], scale = temporal_movement_params$scale[1])
+  ta <- rvonmises(n_steps * n_ch, m = 0, k = temporal_movement_params$kappa[1]) - pi
+  # hist(ta)
+  #ta <- runif(n_steps * n_ch, -pi, pi)
+  # sl <- unlist(as.vector(slice_sample(empirical_pairs, n = n_steps * n_ch, replace = T)[,1]))
+  # ta <- unlist(as.vector(slice_sample(empirical_pairs, n = n_steps * n_ch, replace = T)[,2]))
+  #stp_ta <- slice_sample(empirical_pairs, n = n_steps * n_ch, replace = T)
+  #sl <- as.vector(stp_ta[,1])
+  #ta <- as.numeric(stp_ta[,2])
+  #sl <- base::sample(x = empirical_steps, size = n_steps * n_ch, replace = TRUE)
+  #ta <- base::sample(x = empirical_angles, size = n_steps * n_ch, replace = TRUE)
+  steps <- rep(1:n_steps, each = n_ch)
+  x_0 <- xy0[1]
+  y_0 <- xy0[2]
+  x_s <- sl * sin(ta)
+  y_s <- sl * cos(ta)
+  x <- rep(NA, n_steps)
+  y <- rep(NA, n_steps)
+  x[1] <- x_0
+  y[1] <- y_0
+  # multiply resources with selection coef
+  for (i in 1:length(coef)) resc[[i]] <- resc[[i]] * coef[i][[1]]
+  
+  # i = 2
+  
+  for (i in 2:n_steps) {
+    x_pos <- (x[i - 1] + sl[steps == i] * sin(ta[steps == i])) %% ext(resc)[2] # adding the modulo operator %% ensures a wrapped/toroid landscape, but the origin must be at (0,0)
+    y_pos <- (y[i - 1] + sl[steps == i] * cos(ta[steps == i])) %% ext(resc)[4]
+    p <- exp(rowSums(terra::extract(resc, cbind(x_pos, y_pos))))
+    p[is.na(p)] <- 1e-6
+    w <- sample(n_ch, 1, prob = p)
+    x[i] <- x_pos[w]
+    y[i] <- y_pos[w]
+  }
+  data_frame(x = x, y = y)
+}
+
+```
+
+
+Setting up before the simulation
+- resource layers
+- coefficient values
+- random starting locations
+
+```{r}
+
+resources <- c(ndvi_stack_scaled[[which(time(ndvi_stack_scaled) == temp_coefs$date[1])]], 
+               slope_scaled,
+               veg_herby, 
+               canopy_scaled)
+
+ext(resources) <- c(0, 60000, 0, 57000)
+plot(resources)
+
+coef_values <- harmonic_weighted_mean[1,][1:4]
+
+start_unif <- cbind(runif(1000, min = ext(resources)[1], max = ext(resources)[2]), runif(100, min = ext(resources)[3], max = ext(resources)[4]))
+
+```
+
+
+```{r}
+
+#simulate_ssf <- function(n_steps, n_ch, l = 1, coef, xy0, resc) {
+
+tic()
+stps <- map(1:10, function(i) 
+  simulate_ssf(n_steps = 1e3, n_ch = 50, coef = coef_values, xy0 = start_unif[i,], resc = resources)
+  )
+toc()
+
+# 50 individuals, n_steps = 1e4, n_ch = 50 - 3364.03 sec elapsed
+ 
+# simulate_ssf(1000, 1, 1, omgs[i, ], start_unif[i,], resc)
+  
+  # stps <- map(1:50, function(i) 
+  #   #    simulate_ssf(round(runif(1, 25, 200)), 200, 2, 1, omgs[i, ], c(200, 200), resc)
+  #   #simulate_ssf <- function(n_steps, n_ch, l = 1, coef, xy0, resc)
+  #   #simulate_ssf(1000, 100, 1, omgs[i, ], start_omgs[i,], resc)
+  #   simulate_ssf(1000, 10, 1, omgs[i, ], start_unif[i,], resc)
+  # )
+
+animals <- data_frame(
+  id = paste0("a", 1:10),
+  track = map(stps, ~ track(x = .$x, y = .$y, t = ymd_hm("2019-01-01 00:00") + hours(1:nrow(.))))
+)
+
+
+sim_data <- unnest(animals, cols = track)
+
+#sim_data <- data.frame(x = stps$x, y = stps$y, t = ymd_hm("2022-01-01 00:00") + hours(1:nrow(stps)))
+# sim_data1 %>% transmute(id = "a0", x_ = x, y_ = y, t_ = t)
+# 
+# sim_all <- bind_rows(sim_data1 %>% transmute(id = "a0", x_ = x, y_ = y, t_ = t), sim_data)
+# sim_data <- sim_all
+#sim_20_inds_1000_50 <- sim_data
+
+
+# write_csv(sim_data, "outputs/buffalo_w_mean_bcrw_10indvs_1e3stps_20230210.csv")
+
+```
+
+
+
+
+```{r}
+
+plot(resources[[1]])
+points(x = sim_data$x_, y = sim_data$y_)
+
+
+ndvi_df <- as.data.frame(resources[[1]], xy = TRUE)
+
+#bcrw <- 
+ggplot() +
+  geom_raster(data = ndvi_df, aes(x = x, y = y, fill = ndvi)) +
+  #geom_path(data = sim_data, aes(x = x_, y = y_, colour = id), size = 1) +
+  geom_point(data = sim_data, aes(x = x_, y = y_), size = 0.1, colour = "black", alpha = 0.1) +
+  geom_point(data = buffalo_subset %>% filter(y == 1), aes(x = x1_, y = y1_ + 1463000), size = 0.1, colour = "red") +
+  scale_fill_viridis_c() +
+  #scale_fill_gradient(low = "white", high = "darkgreen") +
+  coord_equal() +
+  ggtitle("Simulation Approach") +
+  theme_bw() +
+  theme(legend.position = "bottom", legend.key.width = unit(1.1, "cm"))
+
+bcrw
+
+
+# buffalo_subset %>% filter(y == 1)
+
+```
+
+
+## generating distribution map
+
+```{r}
+
+points <- resources[[1]]
+points[] <- 0
+
+sim_ud_points <- as.matrix(sim_data[,2:3])
+
+counts <- table(raster::cellFromXY(resources[[1]], sim_ud_points))
+
+points[as.numeric(names(counts))] <- counts
+
+plot(points)
+# plot(points)
+# points(x = sim_data$x, y = sim_data$y)  
+
+points_ud <- points / cellStats(points, stat = "sum")
+cellStats(points_ud, stat = "sum")
+points_df <- as.data.frame(points_ud, xy = TRUE)
+points_df$layer <- points_df$ndvi
+
+bcrw <- 
+  ggplot() +
+  geom_raster(data = points_df, aes(x = x, y = y, fill = layer)) +
+  #geom_point(data = animals_ssf %>% filter(case_ == TRUE), aes(x = x1_, y = y1_, colour = id), size = 0.5) +
+  #scale_fill_viridis_c() +
+  scale_fill_gradient(low = "white", high = "red") +
+  coord_equal() +
+  ggtitle("Simulation Approach") +
+  theme_bw() +
+  theme(legend.position = "bottom", legend.key.width = unit(1.1, "cm"))
+
+bcrw
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
