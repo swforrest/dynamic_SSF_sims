@@ -47,7 +47,10 @@ buffalo_CLR <- buffalo_data %>%
          step_id = step_id_, 
          x1 = x1_, x2 = x2_, 
          y1 = y1_, y2 = y2_, 
-         t1 = t1_, t1_rounded = round_date(buffalo_data$t1_, "hour"), t2 = t2_, 
+         t1 = t1_, 
+         t1_rounded = round_date(buffalo_data$t1_, "hour"), 
+         t2 = t2_, 
+         yday = yday(t1_),
          sl = sl_, log_sl = log_sl_, 
          ta = ta_, cos_ta = cos_ta_,
          year = year(t1_), 
@@ -58,7 +61,8 @@ buffalo_CLR <- buffalo_data %>%
          # day = day(t1_),
          # day_factor = factor(day(t1_)),
          # step_id_factor = factor(step_id_),
-         ndvi_scaled = ((ndvi_temporal - 0.4054526) / 0.1113644),
+         ndvi_scaled = scale(ndvi_temporal),
+         ndvi_scaled_raster = ((ndvi_temporal - 0.4054526) / 0.1113644),
          canopy_01 = canopy_cover/100,
          herby_scaled = scale(veg_herby),
          canopy_scaled = scale(canopy_01),
@@ -68,12 +72,25 @@ buffalo_CLR <- buffalo_data %>%
          slope_scaled = scale(slope_end),
          month_s1 = sin(2*pi*month/12),
          month_s2 = sin(4*pi*month/12),
+         month_s3 = sin(6*pi*month/12),
+         month_s4 = sin(8*pi*month/12),
          month_c1 = cos(2*pi*month/12),
-         month_c2 = cos(4*pi*month/12)) %>%
+         month_c2 = cos(4*pi*month/12),
+         month_c3 = cos(6*pi*month/12),
+         month_c4 = cos(8*pi*month/12),
+         yday_s1 = sin(2*pi*yday/365),
+         yday_s2 = sin(4*pi*yday/365),
+         yday_s3 = sin(6*pi*yday/365),
+         yday_s4 = sin(8*pi*yday/365),
+         yday_c1 = cos(2*pi*yday/365),
+         yday_c2 = cos(4*pi*yday/365),
+         yday_c3 = cos(6*pi*yday/365),
+         yday_c4 = cos(8*pi*yday/365)) %>%
   drop_na(c(ndvi_temporal, veg_herby, canopy_01, sl_)) %>% 
   dplyr::select(!(burst_:case_))
 
 ```
+
 
 Determining how many individuals have at least 1 year of data
 
@@ -94,6 +111,7 @@ buffalo_CLR %>% dplyr::group_by(id) %>%
 
 ```
 
+
 ```{r}
 
 buffalo_CLR %>% filter(y == 1 & id == 2005) %>% ggplot(aes(x = x1, y = y1, colour = t1)) +
@@ -110,7 +128,6 @@ ggsave("outputs/plots/buffalo_data_id2005_20230309.png",
        width=150, height=90, units="mm", dpi = 300)
 
 ```
-
 
 
 Filtering by animals that have more than a year of data
@@ -218,6 +235,12 @@ formula_clr <- y ~
                month_s2:ndvi_scaled +
                month_c1:ndvi_scaled +
                month_c2:ndvi_scaled +
+  
+               I(ndvi_scaled^2) +
+               month_s1:I(ndvi_scaled^2) +
+               month_s2:I(ndvi_scaled^2) +
+               month_c1:I(ndvi_scaled^2) +
+               month_c2:I(ndvi_scaled^2) +
                
                # WOFS05_dist_scaled +
                # month_s1:WOFS05_dist_scaled +
@@ -787,6 +810,8 @@ ndvi_above0_stack_scaled <- rast("mapping/cropped rasters/ndvi_above0_stack_scal
 
 ```
 
+
+
 ```{r}
 
 # elev <- raster("mapping/cropped rasters/DEM_H_raster.tif")
@@ -1186,6 +1211,7 @@ coef_values <- harmonic_weighted_mean[1,][1:4]
 start_unif <- cbind(runif(1000, min = ext(resources)[1], max = ext(resources)[2]), runif(100, min = ext(resources)[3], max = ext(resources)[4]))
 
 ```
+
 
 
 ```{r}
