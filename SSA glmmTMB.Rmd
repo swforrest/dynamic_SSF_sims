@@ -102,7 +102,6 @@ unique(buffalo_CLR_year$id)
 ```
 
 
-
 ```{r}
 
 ggplot() +
@@ -188,235 +187,6 @@ years <- c(rep(2019, 7), rep(2018, 5))
 months <- c(seq(1, 7, 1), seq(8, 12, 1))
 day <- rep(1, 12)
 dates <- make_datetime(year = years, month = months, day = day, tz = "Australia/Queensland")
-
-```
-
-
-## Conditional logistic regression model
-
-```{r}
-
-month_no <- 3
-
-#########################
-
-formula_clr <- y ~ 
-  
-  ndvi_scaled +
-  I(ndvi_scaled^2) +
-  
-  # slope_scaled +
-  # I(slope_scaled^2) +
-  
-  veg_herby +
-  
-  # elev_log +
-  # I(elev_log^2) +
-  
-  # water_dist_log +
-  # I(water_dist_log^2) +
-  
-  canopy_scaled +
-  I(canopy_scaled^2) +
-  
-  sl +
-  log_sl +
-  cos_ta +
-  strata(step_id)
-
-#########################
-
-# 2005 2014 2018 2022 2024 2154 2158 2327 2354 2387
-buffalo_subset <- buffalo_CLR_year %>% filter(id == 2387 & month == month_no)
-
-clogit_subset <- fit_clogit(buffalo_subset, formula = formula_clr)
-
-# summary(clogit_subset)
-# AIC(clogit_subset)
-# clogit_subset$model$coefficients
-
-#########################
-
-clogit_coefs <-coefs_df_function(clogit_subset)
-
-# clogit_model_coef_list <- map(clogit_model_list, coefs_df_function)
-
-#########################
-
-curve(clogit_coefs$value[clogit_coefs$coef == "ndvi_scaled"]*x + 
-        clogit_coefs$value[clogit_coefs$coef == "I(ndvi_scaled^2)"]*x^2, from = -3, to = 3, n = 101)
-
-# curve(clogit_coefs$value[clogit_coefs$coef == "slope_scaled"]*x + 
-#         clogit_coefs$value[clogit_coefs$coef == "I(slope_scaled^2)"]*x^2, from = -3, to = 3, n = 101)
-
-curve(clogit_coefs$value[clogit_coefs$coef == "veg_herby"]*x, from = -3, to = 3, n = 101)
-
-curve(clogit_coefs$value[clogit_coefs$coef == "canopy_scaled"]*x + 
-        clogit_coefs$value[clogit_coefs$coef == "I(canopy_scaled^2)"]*x^2, from = -3, to = 3, n = 101)
-
-#########################
-
-resources <- c(ndvi_above0_stack_scaled[[which(time(ndvi_above0_stack_scaled) == dates[month_no])]], 
-               slope_scaled,
-               veg_herby, 
-               canopy_scaled)
-
-plot(resources[[1]])
-plot(resources[[2]])
-plot(resources[[3]])
-plot(resources[[4]])
-plot(resources)
-
-#########################
-
-naive <- rast(resources)[[1]]
-naive <- terra::setValues(naive, 0)
-names(naive) <- "naive_predictions"
-
-ndvi_naive <- resources[[1]] * clogit_coefs$value[clogit_coefs$coef == "ndvi_scaled"] + 
-  resources[[1]]^2 * clogit_coefs$value[clogit_coefs$coef == "I(ndvi_scaled^2)"]
-# slope_naive <- resources[[2]] * clogit_coefs$value[clogit_coefs$coef == "slope_scaled"] + 
-#   resources[[2]]^2 * clogit_coefs$value[clogit_coefs$coef == "I(slope_scaled^2)"]
-herby_naive <- resources[[3]] * clogit_coefs$value[clogit_coefs$coef == "veg_herby"]
-canopy_naive <- resources[[4]] * clogit_coefs$value[clogit_coefs$coef == "canopy_scaled"] + 
-  resources[[4]]^2 * clogit_coefs$value[clogit_coefs$coef == "I(canopy_scaled^2)"]
-
-naive <- naive + ndvi_naive + herby_naive + canopy_naive # slope_naive + 
-  
-naive_norm <- exp(naive)/global(exp(naive), fun = "sum", na.rm = TRUE)[[1]]
-terra::plot(naive_norm)
-terra::plot(naive_norm)
-points(buffalo_subset$x1, buffalo_subset$y1)
-
-```
-
-
-## Conditional logistic regression model - loop over individuals
-
-```{r}
-
-clogit_subset_list <- vector(mode = "list", length = length(buffalo_year_ids))
-
-for(i in 1:length(buffalo_year_ids)) {
-
-month_no <- i
-
-#########################
-
-formula_clr <- y ~ 
-  
-  ndvi_scaled +
-  I(ndvi_scaled^2) +
-  
-  # slope_scaled +
-  # I(slope_scaled^2) +
-  
-  veg_herby +
-  
-  # elev_log +
-  # I(elev_log^2) +
-  
-  # water_dist_log +
-  # I(water_dist_log^2) +
-  
-  canopy_scaled +
-  I(canopy_scaled^2) +
-  
-  sl +
-  log_sl +
-  cos_ta +
-  strata(step_id)
-
-#########################
-
-# 2005 2014 2018 2022 2024 2154 2158 2327 2354 2387
-buffalo_subset <- buffalo_CLR_year %>% filter(id == buffalo_year_ids[[i]] & month == month_no)
-
-clogit_subset_list[[i]] <- fit_clogit(buffalo_subset, formula = formula_clr)
-
-# summary(clogit_subset)
-# AIC(clogit_subset)
-# clogit_subset$model$coefficients
-
-}
-
-#########################
-
-clogit_model_coef_list <- map(clogit_subset_list, coefs_df_function)
-clogit_coefs <- do.call(rbind, clogit_model_coef_list)
-clogit_coefs$id <- rep(buffalo_year_ids, each = length(clogit_subset_list[[1]]$model$coefficients))
-clogit_coefs
-
-coef <- c()
-mean <- c()
-w_mean <- c()
-
-for(i in 1:length(unique(clogit_coefs$coef))) {
-  
-  # i <- 1
-  
-  coef_i <- unique(clogit_coefs$coef)[i]
-
-  coef <- c(coef, coef_i)
-  
-  mean <- c(mean, 
-            mean(x = clogit_coefs[which(clogit_coefs$coef == coef_i),]$value))
-  
-  w_mean <- c(w_mean, 
-            weighted.mean(x = clogit_coefs[which(clogit_coefs$coef == coef_i),]$value,
-              w = clogit_coefs[which(clogit_coefs$coef == coef_i),]$weight))
-
-}
-
-clogit_weighted_means <- data.frame(coef, mean, w_mean)
-clogit_weighted_means
-
-#########################
-
-curve(clogit_coefs$value[clogit_coefs$coef == "ndvi_scaled"]*x + 
-        clogit_coefs$value[clogit_coefs$coef == "I(ndvi_scaled^2)"]*x^2, from = -3, to = 3, n = 101)
-
-# curve(clogit_coefs$value[clogit_coefs$coef == "slope_scaled"]*x + 
-#         clogit_coefs$value[clogit_coefs$coef == "I(slope_scaled^2)"]*x^2, from = -3, to = 3, n = 101)
-
-curve(clogit_coefs$value[clogit_coefs$coef == "veg_herby"]*x, from = -3, to = 3, n = 101)
-
-curve(clogit_coefs$value[clogit_coefs$coef == "canopy_scaled"]*x + 
-        clogit_coefs$value[clogit_coefs$coef == "I(canopy_scaled^2)"]*x^2, from = -3, to = 3, n = 101)
-
-#########################
-
-resources <- c(ndvi_above0_stack_scaled[[which(time(ndvi_above0_stack_scaled) == dates[month_no])]], 
-               slope_scaled,
-               veg_herby, 
-               canopy_scaled)
-
-plot(resources[[1]])
-plot(resources[[2]])
-plot(resources[[3]])
-plot(resources[[4]])
-plot(resources)
-
-#########################
-
-naive <- rast(resources)[[1]]
-naive <- terra::setValues(naive, 0)
-names(naive) <- "naive_predictions"
-
-ndvi_naive <- resources[[1]] * clogit_coefs$value[clogit_coefs$coef == "ndvi_scaled"] + 
-  resources[[1]]^2 * clogit_coefs$value[clogit_coefs$coef == "I(ndvi_scaled^2)"]
-# slope_naive <- resources[[2]] * clogit_coefs$value[clogit_coefs$coef == "slope_scaled"] + 
-#   resources[[2]]^2 * clogit_coefs$value[clogit_coefs$coef == "I(slope_scaled^2)"]
-herby_naive <- resources[[3]] * clogit_coefs$value[clogit_coefs$coef == "veg_herby"]
-canopy_naive <- resources[[4]] * clogit_coefs$value[clogit_coefs$coef == "canopy_scaled"] + 
-  resources[[4]]^2 * clogit_coefs$value[clogit_coefs$coef == "I(canopy_scaled^2)"]
-
-naive <- naive + ndvi_naive + herby_naive + canopy_naive # slope_naive + 
-  
-naive_norm <- exp(naive)/global(exp(naive), fun = "sum", na.rm = TRUE)[[1]]
-terra::plot(naive_norm)
-terra::plot(naive_norm)
-points(buffalo_subset$x1, buffalo_subset$y1)
 
 ```
 
@@ -696,17 +466,20 @@ cor(buffalo_CLR_year$veg_herby, buffalo_CLR_year$canopy_scaled)
 
 ```{r}
 
-month_no <- 7
-
-buffalo_month_subset <- buffalo_CLR_year %>% filter(month == month_no)
+# month_no <- 7
+# buffalo_month_subset <- buffalo_CLR_year %>% filter(month == month_no)
 
 # sum(is.na(buffalo_CLR_year$water_dist_log))
 
 tic()
-glmmTMB_model_month1 <- glmmTMB(y ~ -1 +
+glmmTMB_model <- glmmTMB(y ~ -1 +
                            # ndvi_scaled +
                            #  I(ndvi_scaled^2) +
-                             poly(ndvi_scaled, degree = 2, raw = FALSE) +
+                            poly(ndvi_scaled, degree = 2, raw = FALSE) +
+                           poly(ndvi_scaled, degree = 2, raw = FALSE):yday_s1 +
+                           poly(ndvi_scaled, degree = 2, raw = FALSE):yday_s2 +
+                           poly(ndvi_scaled, degree = 2, raw = FALSE):yday_c1 +
+                           poly(ndvi_scaled, degree = 2, raw = FALSE):yday_c2 +
                             # slope_scaled +
                             # I(slope_scaled^2) +
                              # herby_scaled +
@@ -721,6 +494,10 @@ glmmTMB_model_month1 <- glmmTMB(y ~ -1 +
                             # canopy_scaled +
                             # I(canopy_scaled^2) +
                              poly(canopy_scaled, degree = 2, raw = FALSE) +
+                           poly(canopy_scaled, degree = 2, raw = FALSE):yday_s1 +
+                           poly(canopy_scaled, degree = 2, raw = FALSE):yday_s2 +
+                           poly(canopy_scaled, degree = 2, raw = FALSE):yday_c1 +
+                           poly(canopy_scaled, degree = 2, raw = FALSE):yday_c2 +
                              
                              sl +
                              log_sl +
@@ -746,7 +523,7 @@ glmmTMB_model_month1 <- glmmTMB(y ~ -1 +
                          )
 toc()
 
-summary(glmmTMB_model_month1)
+summary(glmmTMB_model)
 
 ```
 
@@ -754,9 +531,125 @@ summary(glmmTMB_model_month1)
 
 ```{r}
 
-glmmTMB_model_month1$fit$par
+coefs <- glmmTMB_model$fit$par
+
+
 
 ```
+
+
+Extracting coefficient curves from the harmonics
+
+```{r}
+
+clogit_coef_df <- clogit_model_coef_list[[1]]
+
+x_month <- seq(0, 12, 0.1)
+
+y_month <- function(x,
+                    lin_coef,
+                    sin_coef1,
+                    sin_coef2,
+                    cos_coef1,
+                    cos_coef2) {
+
+  lin_coef +
+    (sin_coef1 * sin(2 * pi * x / 12)) +
+    (sin_coef2 * sin(4 * pi * x / 12)) +
+    (cos_coef1 * cos(2 * pi * x / 12)) +
+    (cos_coef2 * cos(4 * pi * x / 12))
+}
+
+
+
+harmonic_coefs_function <- function(clogit_coef_df) {
+
+y_ndvi_month <- map_dbl(x_month,
+             y_month,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_temporal:month_c2")])
+
+y_wofs05_month <- map_dbl(x_month,
+             y_month,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "WOFS05_dist_scaled:month_c2")])
+
+y_wofs05_Q_month <- map_dbl(x_month,
+             y_month,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2)")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "I(WOFS05_dist_scaled^2):month_c2")])
+
+y_slope_month <- map_dbl(x_month,
+             y_month,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled:month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled:month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled:month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "slope_scaled:month_c2")])
+
+y_herby_month <- map_dbl(x_month,
+             y_month,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby:month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby:month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby:month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "veg_herby:month_c2")])
+
+y_canopy <- map_dbl(x_month,
+             y_month,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_01")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_01:month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_01:month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_01:month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_01:month_c2")])
+
+y_log_sl <- map_dbl(x_month,
+             y_month,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl_")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl_:month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl_:month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl_:month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl_:month_c2")])
+
+y_cos_ta <- map_dbl(x_month,
+             y_month,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta_")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta_:month_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta_:month_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta_:month_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta_:month_c2")])
+
+return(data.frame("ndvi" = y_ndvi_month, 
+                  "wofs05" = y_wofs05_month, 
+                  "wofs05_Q" = y_wofs05_Q_month, 
+                  "slope" = y_slope_month, 
+                  "herby" = y_herby_month, 
+                  "canopy" = y_canopy, 
+                  "log_sl" = y_log_sl, 
+                  "cos_ta" = y_cos_ta))
+
+}
+
+
+harmonic_coefs_function(clogit_model_coef_list[[3]])
+
+harmonic_coefs_list <- map(clogit_model_coef_list, harmonic_coefs_function)
+
+harmonic_coefs_df <- cbind("id" = rep(buffalo_ids, each = 121), "month" = x_month, do.call(rbind, harmonic_coefs_list))
+
+harmonic_coefs <- pivot_longer(harmonic_coefs_df, cols = !1:2, names_to = "coef")
+
+```
+
 
 
 ```{r}
@@ -826,8 +719,8 @@ f2 <- ((ndvi_df[,2] - alpha_coef[2]) * sqrt(norm2_coef[3]) * f1 - norm2_coef[3] 
          sqrt(norm2_coef[2]) * f0) / sqrt(norm2_coef[4])
 # f2
 
-ndvi_lin <- glmmTMB_model_month1$fit$par[1]
-ndvi_quad <- glmmTMB_model_month1$fit$par[2]
+ndvi_lin <- glmmTMB_model$fit$par[1]
+ndvi_quad <- glmmTMB_model$fit$par[2]
 
 ndvi_df$pred <- (f1 * ndvi_lin) + (f2 * ndvi_quad)
 
@@ -881,7 +774,7 @@ f1 <- (veg_herby_df[,2] - alpha_coef[1]) / sqrt(norm2_coef[3])
 #          sqrt(norm2_coef[2]) * f0) / sqrt(norm2_coef[4])
 # f2
 
-herby_lin <- glmmTMB_model_month1$fit$par[3]
+herby_lin <- glmmTMB_model$fit$par[3]
 
 veg_herby_df$pred <- f1 * ndvi_lin
 
@@ -935,7 +828,7 @@ f1 <- (veg_herby_df[,2] - alpha_coef[1]) / sqrt(norm2_coef[3])
 #          sqrt(norm2_coef[2]) * f0) / sqrt(norm2_coef[4])
 # f2
 
-herby_lin <- glmmTMB_model_month1$fit$par[3]
+herby_lin <- glmmTMB_model$fit$par[3]
 
 veg_herby_df$pred <- f1 * ndvi_lin
 
@@ -987,8 +880,8 @@ f2 <- ((ndvi_df[,2] - alpha_coef[2]) * sqrt(norm2_coef[3]) * f1 - norm2_coef[3] 
          sqrt(norm2_coef[2]) * f0) / sqrt(norm2_coef[4])
 # f2
 
-ndvi_lin <- glmmTMB_model_month1$fit$par[1]
-ndvi_quad <- glmmTMB_model_month1$fit$par[2]
+ndvi_lin <- glmmTMB_model$fit$par[1]
+ndvi_quad <- glmmTMB_model$fit$par[2]
 
 ndvi_df$pred <- (f1 * ndvi_lin) + (f2 * ndvi_quad)
 
@@ -1046,8 +939,8 @@ f2 <- ((canopy_df[,2] - alpha_coef[2]) * sqrt(norm2_coef[3]) * f1 - norm2_coef[3
 # canopy_lin <- glmmTMB_model_month1$fit$par[4]
 # canopy_quad <- glmmTMB_model_month1$fit$par[5]
 
-canopy_lin <- glmmTMB_model_month1$fit$par[3]
-canopy_quad <- glmmTMB_model_month1$fit$par[4]
+canopy_lin <- glmmTMB_model$fit$par[3]
+canopy_quad <- glmmTMB_model$fit$par[4]
 
 canopy_df$pred <- (f1 * canopy_lin) + (f2 * canopy_quad)
 
