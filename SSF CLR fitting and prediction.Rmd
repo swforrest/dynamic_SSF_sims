@@ -803,7 +803,15 @@ Importing habitat layers
 
 ```{r}
 
-# ndvi_projected <- rast("mapping/cropped rasters/ndvi_GEE_projected_watermask20230207.tif")
+ndvi_projected <- rast("mapping/cropped rasters/ndvi_GEE_projected_watermask20230207.tif")
+
+# scaling from the buffalo data
+scaling_mean <- as.numeric(attributes(buffalo_CLR_year$ndvi_scaled)[1]) # 0.3125089
+scaling_sd <- as.numeric(attributes(buffalo_CLR_year$ndvi_scaled)[2]) # 0.143179 for July 2018
+
+ndvi_stack_scaled <- (ndvi_projected - scaling_mean) / scaling_sd
+plot(ndvi_stack_scaled)
+
 # plot(ndvi_projected[ndvi_projected > 0])
 # 
 # for(i in 1:nlyr(ndvi_projected)) {
@@ -978,7 +986,7 @@ monthly_coefs <- data.frame("date" = dates,
                          "scale" = harmonic_weighted_mean$scale[seq(1, 331, 30)],
                          "kappa" = harmonic_weighted_mean$kappa[seq(1, 331, 30)])
 
-write_csv(monthly_coefs, "outputs/weighted_mean_monthly_CLR_coefs_wide_yday_with_movement_params_20230424.csv") # weighted mean
+# write_csv(monthly_coefs, "outputs/weighted_mean_monthly_CLR_coefs_wide_yday_with_movement_params_20230424.csv") # weighted mean
 
 monthly_coefs_long <- monthly_coefs %>% pivot_longer(cols = !date)
 
@@ -1006,6 +1014,157 @@ monthly_coefs_long %>% filter(!name %in% c("shape", "scale", "kappa")) %>% ggplo
 # plot(resources)
 # 
 # emp_coefs <- clogit_model$model$coefficients[1:4]
+
+```
+
+
+# Predictions and cross-validation
+
+Boyce index function
+
+```{r}
+
+ecospat.boyce2 <- function (fit, obs, nclass = 0, window.w = "default", res = 100, 
+  PEplot = TRUE, rm.duplicate = TRUE, method = "spearman") 
+{
+  boycei <- function(interval, obs, fit) {
+    pi <- sum(as.numeric(obs >= interval[1] & obs <= interval[2]))/length(obs)
+    ei <- sum(as.numeric(fit >= interval[1] & fit <= interval[2]))/length(fit)
+    return(round(pi/ei, 10))
+  }
+  if (inherits(fit, "RasterLayer")) {
+    if (is.data.frame(obs) || is.matrix(obs)) {
+      obs <- raster::extract(fit, obs)
+    }
+    fit <- getValues(fit)
+    fit <- fit[!is.na(fit)]
+    obs <- obs[!is.na(obs)]
+  }
+  mini <- min(fit, obs)
+  maxi <- max(fit, obs)
+  if (length(nclass) == 1) {
+    if (nclass == 0) {
+      if (window.w == "default") {
+        window.w <- (max(fit) - min(fit))/10
+      }
+      vec.mov <- seq(from = mini, to = maxi - window.w, 
+        by = (maxi - mini - window.w)/res)
+      vec.mov[res + 1] <- vec.mov[res + 1] + 1
+      interval <- cbind(vec.mov, vec.mov + window.w)
+    }
+    else {
+      vec.mov <- seq(from = mini, to = maxi, by = (maxi - 
+        mini)/nclass)
+      interval <- cbind(vec.mov, c(vec.mov[-1], maxi))
+    }
+  }
+  else {
+    vec.mov <- c(mini, sort(nclass[!nclass > maxi | nclass < 
+      mini]))
+    interval <- cbind(vec.mov, c(vec.mov[-1], maxi))
+  }
+  f <- apply(interval, 1, boycei, obs, fit)
+  to.keep <- which(f != "NaN")
+  f <- f[to.keep]
+  if (length(f) < 2) {
+    b <- NA
+  }
+  else {
+    r <- 1:length(f)
+    if (rm.duplicate == TRUE) {
+      r <- c(1:length(f))[f != c(f[-1], TRUE)]
+    }
+    b <- cor(f[r], vec.mov[to.keep][r], method = method)
+  }
+  HS <- apply(interval, 1, sum)/2
+  if (length(nclass) == 1 & nclass == 0) {
+    HS[length(HS)] <- HS[length(HS)] - 1
+  }
+  HS <- HS[to.keep]
+  if (PEplot == TRUE) {
+    plot(HS, f, xlab = "Habitat suitability", ylab = "Predicted/Expected ratio", 
+      col = "grey", cex = 0.75)
+    points(HS[r], f[r], pch = 19, cex = 0.75)
+  }
+  return(list(F.ratio = f, cor = round(b, 3), HS = HS))
+}
+
+```
+
+
+
+```{r}
+
+for(i in 1:12) {
+
+resources <- c(ndvi_stack_scaled[[which(time(ndvi_stack_scaled) == monthly_coefs$date[i])]], 
+               # slope_scaled,
+               # veg_herby, 
+               canopy_scaled)
+
+# ndvi
+ndvi_lin <- resources[[1]]
+ndvi_lin <- ndvi_lin * monthly_coefs$ndvi[[i]]
+plot(ndvi_lin)
+
+ndvi_quad <- resources[[1]]
+ndvi_quad <- (ndvi_quad ^ 2) * monthly_coefs$ndvi_quad[[i]] 
+plot(ndvi_quad)
+
+ndvi_pred <- ndvi_lin + ndvi_quad
+plot(ndvi_pred)
+
+# canopy cover 
+canopy_lin <- resources[[2]]
+canopy_lin <- canopy_lin * monthly_coefs$canopy[[i]]
+plot(canopy_lin)
+
+canopy_quad <- resources[[2]]
+canopy_quad <- (canopy_quad ^ 2) * monthly_coefs$canopy_quad[[i]] 
+plot(canopy_quad)
+
+canopy_pred <- canopy_lin + canopy_quad
+plot(canopy_pred)
+
+# combining
+naive_pred <- exp(ndvi_pred + canopy_pred) / global(exp(ndvi_pred + canopy_pred), fun = "sum", na.rm = TRUE)[[1]]
+plot(naive_pred)
+points(as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(x1) %>% unlist()), 
+       as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(y1) %>% unlist()))
+
+
+# setting up the buffalo observation data for the relevant month
+
+# buffalo_obs <- buffalo_CLR_year %>% 
+#   filter(y == 1 & month == 1 & x1 > xmin & x1 < xmax & y1 > ymin & y1 < ymax) %>% 
+#   transmute(x = x1 - xmin, y = y1 - ymin)
+
+buffalo_obs <- buffalo_CLR_year %>% filter(y == 1 & month == i) %>% 
+  transmute(x = x1, y = y1)
+
+naive_raster <- raster(naive_pred)
+# naive_raster <- raster(naive_pred_cropped)
+
+# plot(naive_pred)
+# plot(naive_raster)
+
+# plot(naive_cropped_raster[[1]])
+
+# boyce_naive <- ecospat.boyce2(naive_cropped_raster[[1]], buffalo_obs,
+#                               # method = "spearman"
+#                               method = "pearson",
+#                               # method = "kendall"
+#                               )
+
+boyce_naive_list[[i]] <- ecospat.boyce2(naive_raster, buffalo_obs,
+                              method = "spearman"
+                              # method = "pearson",
+                              # method = "kendall"
+                              )
+
+boyce_naive
+
+}
 
 ```
 
