@@ -1,0 +1,191 @@
+---
+title: "Buffalo data prep"
+author: "Scott Forrest"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Import packages
+
+```{r message = FALSE}
+
+library(tidyverse)
+library(lubridate)
+
+```
+
+
+Import buffalo telemetry data.
+
+```{r message = FALSE}
+
+# buffalo_CLR <- read_csv(file = "outputs/buffalo_parametric_indv_covs_20230208.csv")
+# using the population estimate as the TENTATIVE distribution will make it easier to estimate the weighted mean estimate of the movement kernel
+buffalo_data <- read_csv(file = "outputs/buffalo_parametric_popn_covs_20230208.csv")
+
+# data filtered to be individuals with at least 1 year of data, truncated to cover just a single year, and with most of the covariates already added (besides the scaled covariates)
+# buffalo_data <- read_csv(file = "outputs/buffalo_1year_aligned_steps_parametric_popn_covs_20230427.csv")
+
+unique(buffalo_data$id)
+
+# scaling_mean <- mean(values(ndvi_projected[[7]], na.rm = TRUE)) # 0.4054526 for July 2018
+# scaling_sd <- sd(values(ndvi_projected[[7]], na.rm = TRUE)) # 0.1113644 for July 2018
+
+buffalo_CLR <- buffalo_data %>% 
+  mutate(id_num = as.numeric(factor(id)), 
+         step_id = step_id_, 
+         x1 = x1_, x2 = x2_, 
+         y1 = y1_, y2 = y2_, 
+         t1 = t1_, 
+         t1_rounded = round_date(buffalo_data$t1_, "hour"), 
+         t2 = t2_, 
+         yday = yday(t1_),
+         sl = sl_, log_sl = log_sl_, 
+         ta = ta_, cos_ta = cos_ta_,
+         year = year(t1_), 
+         month = month(t1_), 
+         # month_factor = factor(month(t1_)),
+         hour = hour(t1_),
+         # hour_factor = factor(hour),
+         # day = day(t1_),
+         # day_factor = factor(day(t1_)),
+         # step_id_factor = factor(step_id_),
+         ndvi_scaled = scale(ndvi_temporal),
+         ndvi_scaled_raster = ((ndvi_temporal - 0.4054526) / 0.1113644),
+         canopy_01 = canopy_cover/100,
+         herby_scaled = scale(veg_herby),
+         canopy_scaled = scale(canopy_01),
+         elev_scaled = scale(DEM_H_end),
+         elev_delta_scaled = scale(elev_delta),
+         elev_log_scaled = scale(elev_log),
+         slope_scaled = scale(slope_end),
+         month_s1 = sin(2*pi*month/12),
+         month_s2 = sin(4*pi*month/12),
+         month_s3 = sin(6*pi*month/12),
+         month_s4 = sin(8*pi*month/12),
+         month_c1 = cos(2*pi*month/12),
+         month_c2 = cos(4*pi*month/12),
+         month_c3 = cos(6*pi*month/12),
+         month_c4 = cos(8*pi*month/12),
+         yday_s1 = sin(2*pi*yday/365),
+         yday_s2 = sin(4*pi*yday/365),
+         yday_s3 = sin(6*pi*yday/365),
+         yday_s4 = sin(8*pi*yday/365),
+         yday_c1 = cos(2*pi*yday/365),
+         yday_c2 = cos(4*pi*yday/365),
+         yday_c3 = cos(6*pi*yday/365),
+         yday_c4 = cos(8*pi*yday/365)) %>%
+  drop_na(c(ndvi_temporal, veg_herby, canopy_01, sl_)) %>% 
+  dplyr::select(!(burst_:case_))
+
+```
+
+
+Determining how many individuals have at least 1 year of data
+
+```{r}
+
+buffalo_CLR %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
+  geom_point(alpha = 0.1) +
+  scale_y_discrete("Buffalo ID") +
+  scale_x_datetime("Date") +
+  scale_colour_viridis_d() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+buffalo_CLR %>% dplyr::group_by(id) %>%  
+  summarise(min_time = min(t1), max_time = max(t1),
+            min_x = min(x2), max_x = max(x2),
+            min_y = min(y2), max_y = max(y2))
+
+buffalo_CLR %>% filter(y == 1 & id == 2005) %>% ggplot(aes(x = x1, y = y1, colour = t1)) +
+  geom_point(alpha = 0.5) +
+  geom_path(alpha = 0.5) +
+  coord_equal() +
+  scale_y_continuous("Northing (m)") +
+  scale_x_continuous("Easting (m)") +
+  scale_colour_datetime() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+# ggsave("outputs/plots/buffalo_data_id2005_20230309.png",
+#        width=150, height=90, units="mm", dpi = 300)
+
+```
+
+
+Filtering by animals that have more than a year of data
+
+```{r}
+
+buffalo_year_ids <- c(2005, 2014, 2018, 2022, 2024, 2154, 2158, 2327, 2354, 2387)
+buffalo_CLR_year <- buffalo_CLR %>% filter(id %in% buffalo_year_ids)
+unique(buffalo_CLR_year$id)
+
+```
+
+
+Aligning step ids
+
+```{r}
+
+# buffalo_stan <- buffalo_all_covs %>% 
+#   filter(id != 2346) %>% 
+#   drop_na(c(ndvi_temporal, ndwi_temporal, veg_herby, canopy_01, sl_)) %>% 
+#   
+#   mutate(id_num = as.numeric(factor(id)), step_id = step_id_, 
+#          x1 = x1_, x2 = x2_, 
+#          y1 = y1_, y2 = y2_, 
+#          t1 = t1_, t1_rounded = round_date(buffalo_stan$t1, "hour"), t2 = t2_, 
+#          sl = sl_, log_sl = log_sl_, 
+#          ta = ta_, cos_ta = cos_ta_)  %>% 
+#   
+#   dplyr::select(!(burst_:case_))
+
+rounded_hours <- unique(round_date(buffalo_CLR_year$t1, "hour"))
+rounded_hours <- rounded_hours[order(rounded_hours)]
+unique_hours <- 1:length(unique(round_date(buffalo_CLR_year$t1, "hour")))
+hourly_steps <- data.frame(unique_hours, rounded_hours)
+
+buffalo_CLR_year$step_aligned <- 0
+for(i in 1:length(unique_hours)) {
+  buffalo_CLR_year$step_aligned[which(buffalo_CLR_year$t1_rounded == hourly_steps$rounded_hours[i])] <- hourly_steps$unique_hours[i]
+}
+
+
+# buffalo_CLR_year %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
+#   geom_point(alpha = 0.1) +
+#   scale_y_discrete("Buffalo ID") +
+#   scale_x_datetime("Date") +
+#   scale_colour_viridis_d() +
+#   theme_bw() +
+#   theme(legend.position = "none")
+
+# ggsave("outputs/plots/buffalo_timeline_20221220.png", width=150, height=90, units="mm", dpi = 300)
+
+# buffalo_CLR_year %>% ggplot(aes(x = step_id, y = factor(id), colour = factor(id))) +
+#   geom_point() +
+#   scale_y_discrete("Buffalo ID") +
+#   scale_x_continuous("Step ID") +
+#   scale_colour_viridis_d() +
+#   theme_bw() +
+#   theme(legend.position = "none")
+
+buffalo_CLR_year %>% ggplot(aes(x = step_aligned, y = factor(id), colour = factor(id))) +
+  geom_point() +
+  scale_y_discrete("Buffalo ID") +
+  scale_x_continuous("Aligned Step ID") +
+  scale_colour_viridis_d() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+# ggsave("outputs/plots/buffalo_timeline_steps_20221220.png", width=150, height=90, units="mm", dpi = 300)
+
+# buffalo_CLR_year <- buffalo_CLR_year[, -c(35, 38, 39, 40, 41, 42, 43)]
+# write_csv(buffalo_CLR_year, file = "outputs/buffalo_1year_aligned_steps_parametric_popn_covs_20230427.csv")
+
+```
