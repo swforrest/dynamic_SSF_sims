@@ -8,7 +8,8 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-update.packages(ask = FALSE, checkBuilt = TRUE)
+# update.packages(ask = FALSE, checkBuilt = TRUE)
+
 ```
 
 
@@ -21,7 +22,9 @@ update.packages(ask = FALSE, checkBuilt = TRUE)
 
 library(tidyverse)
 
-packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", "RColorBrewer", "patchwork", "ecospat", "ggmap", "basemaps", "mapedit", "sf", "rstan", "brms", "beepr")
+# install_cmdstan()
+
+packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", "RColorBrewer", "patchwork", "ecospat", "ggmap", "basemaps", "mapedit", "sf", "rstan", "brms", "beepr", "cmdstanr")
 walk(packages, require, character.only = T)
 
 rstan_options(auto_write = TRUE)
@@ -30,79 +33,7 @@ options(mc.cores = parallel::detectCores())
 ```
 
 
-Import buffalo telemetry data
-
-```{r message = FALSE}
-
-# buffalo_CLR <- read_csv(file = "outputs/buffalo_parametric_indv_covs_20230208.csv")
-# using the population estimate as the TENTATIVE distribution will make it easier to estimate the weighted mean estimate of the movement kernel
-buffalo_data <- read_csv(file = "outputs/buffalo_parametric_popn_covs_20230208.csv")
-
-unique(buffalo_data$id)
-
-# scaling_mean <- mean(values(ndvi_projected[[7]], na.rm = TRUE)) # 0.4054526 for July 2018
-# scaling_sd <- sd(values(ndvi_projected[[7]], na.rm = TRUE)) # 0.1113644 for July 2018
-
-buffalo_CLR <- buffalo_data %>% 
-  mutate(id_num = as.numeric(factor(id)), 
-         step_id = step_id_, 
-         x1 = x1_, x2 = x2_, 
-         y1 = y1_, y2 = y2_, 
-         t1 = t1_, 
-         t1_rounded = round_date(buffalo_data$t1_, "hour"), 
-         t2 = t2_, 
-         yday = yday(t1_),
-         sl = sl_, log_sl = log_sl_, 
-         ta = ta_, cos_ta = cos_ta_,
-         year = year(t1_), 
-         month = month(t1_), 
-         # month_factor = factor(month(t1_)),
-         hour = hour(t1_),
-         # hour_factor = factor(hour),
-         # day = day(t1_),
-         # day_factor = factor(day(t1_)),
-         # step_id_factor = factor(step_id_),
-         ndvi_scaled = scale(ndvi_temporal),
-         ndvi_scaled_raster = ((ndvi_temporal - 0.4054526) / 0.1113644),
-         canopy_01 = canopy_cover/100,
-         herby_scaled = scale(veg_herby),
-         canopy_scaled = scale(canopy_01),
-         elev_scaled = scale(DEM_H_end),
-         elev_delta_scaled = scale(elev_delta),
-         elev_log_scaled = scale(elev_log),
-         slope_scaled = scale(slope_end),
-         month_s1 = sin(2*pi*month/12),
-         month_s2 = sin(4*pi*month/12),
-         month_s3 = sin(6*pi*month/12),
-         month_s4 = sin(8*pi*month/12),
-         month_c1 = cos(2*pi*month/12),
-         month_c2 = cos(4*pi*month/12),
-         month_c3 = cos(6*pi*month/12),
-         month_c4 = cos(8*pi*month/12),
-         yday_s1 = sin(2*pi*yday/365),
-         yday_s2 = sin(4*pi*yday/365),
-         yday_s3 = sin(6*pi*yday/365),
-         yday_s4 = sin(8*pi*yday/365),
-         yday_c1 = cos(2*pi*yday/365),
-         yday_c2 = cos(4*pi*yday/365),
-         yday_c3 = cos(6*pi*yday/365),
-         yday_c4 = cos(8*pi*yday/365)) %>%
-  drop_na(c(ndvi_temporal, veg_herby, canopy_01, sl_)) %>% 
-  dplyr::select(!(burst_:case_))
-
-```
-
-Filtering by animals that have more than a year of data
-
-```{r}
-
-buffalo_year_ids <- c(2005, 2014, 2018, 2022, 2024, 2154, 2158, 2327, 2354, 2387)
-buffalo_CLR_year <- buffalo_CLR %>% filter(id %in% buffalo_year_ids)
-unique(buffalo_CLR_year$id)
-
-```
-
-
+Use data prep markdown document to import and prepare buffalo telemetry data
 
 ```{r}
 
@@ -126,6 +57,7 @@ hist(buffalo_CLR_year$elev_delta_scaled, breaks = 100)
 ```
 
 
+Checking the harmonic transformations - use day of the year rather than the month
 
 ```{r}
 
@@ -153,7 +85,7 @@ ggplot() +
 
 ```
 
-
+Create a subset of the data to use in the stan model
 
 ```{r}
 
@@ -166,13 +98,18 @@ ggplot() +
 buffalo_subset <- buffalo_CLR_year %>%
   # filter(year == 2019) %>% # & (id == 2005 | id == 2018) & (month == 11)
   mutate(id_num = as.numeric(factor(id))) %>% 
-  dplyr::select(id, id_num, ndvi_scaled, herby_scaled, canopy_scaled, y, step_id, sl, log_sl, cos_ta) %>% 
+  dplyr::select(id, id_num, ndvi_scaled, herby_scaled, canopy_scaled, y, step_id, step_aligned, sl, log_sl, cos_ta) %>% 
   drop_na(cos_ta)
 
 sum(is.na(buffalo_subset$cos_ta))
 
 ggplot() +
-  geom_point(data = buffalo_subset, aes(x = step_id, y = id_num))
+  geom_point(data = buffalo_subset, aes(x = step_id, y = factor(id_num))) +
+  theme_classic()
+
+ggplot() +
+  geom_point(data = buffalo_subset, aes(x = step_aligned, y = factor(id_num))) +
+  theme_classic()
 
 ```
 
@@ -255,6 +192,7 @@ model {
 ```
 
 
+Prior predictive
 
 ```{r}
 
@@ -293,7 +231,7 @@ generated quantities {
 ```
 
 
-
+Compiling the model
 
 ```{r}
 
