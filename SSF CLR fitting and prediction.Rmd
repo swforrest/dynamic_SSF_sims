@@ -18,6 +18,9 @@ Import packages
 
 options(scipen=999)
 
+# install.packages("dplyr")
+# install.packages("dplyr")
+
 library(tidyverse)
 
 packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", 
@@ -140,6 +143,66 @@ unique(buffalo_CLR_year$id)
 
 ```
 
+
+Aligning step ids
+
+```{r}
+
+# buffalo_stan <- buffalo_all_covs %>% 
+#   filter(id != 2346) %>% 
+#   drop_na(c(ndvi_temporal, ndwi_temporal, veg_herby, canopy_01, sl_)) %>% 
+#   
+#   mutate(id_num = as.numeric(factor(id)), step_id = step_id_, 
+#          x1 = x1_, x2 = x2_, 
+#          y1 = y1_, y2 = y2_, 
+#          t1 = t1_, t1_rounded = round_date(buffalo_stan$t1, "hour"), t2 = t2_, 
+#          sl = sl_, log_sl = log_sl_, 
+#          ta = ta_, cos_ta = cos_ta_)  %>% 
+#   
+#   dplyr::select(!(burst_:case_))
+
+rounded_hours <- unique(round_date(buffalo_CLR_year$t1, "hour"))
+rounded_hours <- rounded_hours[order(rounded_hours)]
+unique_hours <- 1:length(unique(round_date(buffalo_CLR_year$t1, "hour")))
+hourly_steps <- data.frame(unique_hours, rounded_hours)
+
+buffalo_CLR_year$step_aligned <- 0
+for(i in 1:length(unique_hours)) {
+  buffalo_CLR_year$step_aligned[which(buffalo_CLR_year$t1_rounded == hourly_steps$rounded_hours[i])] <- hourly_steps$unique_hours[i]
+}
+
+
+buffalo_CLR_year %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
+  geom_point(alpha = 0.1) +
+  scale_y_discrete("Buffalo ID") +
+  scale_x_datetime("Date") +
+  scale_colour_viridis_d() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+# ggsave("outputs/plots/buffalo_timeline_20221220.png", width=150, height=90, units="mm", dpi = 300)
+
+buffalo_CLR_year %>% ggplot(aes(x = step_id, y = factor(id), colour = factor(id))) +
+  geom_point() +
+  scale_y_discrete("Buffalo ID") +
+  scale_x_continuous("Step ID") +
+  scale_colour_viridis_d() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+buffalo_CLR_year %>% ggplot(aes(x = step_aligned, y = factor(id), colour = factor(id))) +
+  geom_point() +
+  scale_y_discrete("Buffalo ID") +
+  scale_x_continuous("Aligned Step ID") +
+  scale_colour_viridis_d() +
+  theme_bw() +
+  theme(legend.position = "none")
+
+# ggsave("outputs/plots/buffalo_timeline_steps_20221220.png", width=150, height=90, units="mm", dpi = 300)
+
+```
+
+
 Movement parameters from random sampling
 
 ```{r}
@@ -221,7 +284,6 @@ movement_parameters_year <- movement_parameters %>% filter(id %in% buffalo_year_
 #   width=150, height=90, units="mm", dpi = 300)
 
 ```
-
 
 
 ## Conditional logistic regression model
@@ -309,6 +371,7 @@ formula_clr <- y ~
 
 ```
 
+
 Looping over all individuals
 
 ```{r}
@@ -379,6 +442,7 @@ clogit_coefs %>% filter(coef == "I(canopy_scaled^2)")
 # pivot_longer(clogit_coefs, cols = coef, names_to = c("coef", "se"))
 
 ```
+
 
 Calculating WEIGHTED arithmetic mean coefficient values across months 
 
@@ -639,6 +703,8 @@ plot(xvm, dvonmises(xvm,
 
 ```
 
+
+
 ```{r}
 
 n <- 1e5
@@ -894,7 +960,7 @@ canopy_cover <- rast("mapping/cropped rasters/canopy_cover.tif")
 
 ```
 
-Scaling rasters
+Scaled rasters
 
 ```{r}
 
@@ -1095,6 +1161,9 @@ ecospat.boyce2 <- function (fit, obs, nclass = 0, window.w = "default", res = 10
 
 ```{r}
 
+boyce_naive_list <- vector(mode = "list", length = 12)
+naive_pred_stack <- c()
+
 for(i in 1:12) {
 
 resources <- c(ndvi_stack_scaled[[which(time(ndvi_stack_scaled) == monthly_coefs$date[i])]], 
@@ -1105,32 +1174,35 @@ resources <- c(ndvi_stack_scaled[[which(time(ndvi_stack_scaled) == monthly_coefs
 # ndvi
 ndvi_lin <- resources[[1]]
 ndvi_lin <- ndvi_lin * monthly_coefs$ndvi[[i]]
-plot(ndvi_lin)
+# plot(ndvi_lin)
 
 ndvi_quad <- resources[[1]]
 ndvi_quad <- (ndvi_quad ^ 2) * monthly_coefs$ndvi_quad[[i]] 
-plot(ndvi_quad)
+# plot(ndvi_quad)
 
 ndvi_pred <- ndvi_lin + ndvi_quad
-plot(ndvi_pred)
+# plot(ndvi_pred)
 
 # canopy cover 
 canopy_lin <- resources[[2]]
 canopy_lin <- canopy_lin * monthly_coefs$canopy[[i]]
-plot(canopy_lin)
+# plot(canopy_lin)
 
 canopy_quad <- resources[[2]]
 canopy_quad <- (canopy_quad ^ 2) * monthly_coefs$canopy_quad[[i]] 
-plot(canopy_quad)
+# plot(canopy_quad)
 
 canopy_pred <- canopy_lin + canopy_quad
-plot(canopy_pred)
+# plot(canopy_pred)
 
 # combining
 naive_pred <- exp(ndvi_pred + canopy_pred) / global(exp(ndvi_pred + canopy_pred), fun = "sum", na.rm = TRUE)[[1]]
 plot(naive_pred)
+plot(naive_pred)
 points(as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(x1) %>% unlist()), 
        as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(y1) %>% unlist()))
+
+naive_pred_stack <- c(naive_pred_stack, naive_pred)
 
 
 # setting up the buffalo observation data for the relevant month
@@ -1162,11 +1234,38 @@ boyce_naive_list[[i]] <- ecospat.boyce2(naive_raster, buffalo_obs,
                               # method = "kendall"
                               )
 
-boyce_naive
+boyce_naive_list[[i]]
 
 }
 
 ```
+
+
+```{r}
+
+for(i in 1:12) {
+  plot(naive_pred_stack[[i]])
+}
+
+for(i in 1:12) {
+  # plot(naive_pred_stack[[i]])
+  plot(naive_pred_stack[[i]])
+  points(as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(x1) %>% unlist()), 
+       as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(y1) %>% unlist()))
+}
+
+```
+
+
+```{r}
+
+for(i in 1:12) print(boyce_naive_list[[i]]$cor)
+
+```
+
+
+
+
 
 
 
