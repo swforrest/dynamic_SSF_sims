@@ -89,28 +89,28 @@ Determining how many individuals have at least 1 year of data
 
 ```{r}
 
-buffalo_CLR %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
-  geom_point(alpha = 0.1) +
-  scale_y_discrete("Buffalo ID") +
-  scale_x_datetime("Date") +
-  scale_colour_viridis_d() +
-  theme_bw() +
-  theme(legend.position = "none")
+# buffalo_CLR %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
+#   geom_point(alpha = 0.1) +
+#   scale_y_discrete("Buffalo ID") +
+#   scale_x_datetime("Date") +
+#   scale_colour_viridis_d() +
+#   theme_bw() +
+#   theme(legend.position = "none")
 
-buffalo_CLR %>% dplyr::group_by(id) %>%  
-  summarise(min_time = min(t1), max_time = max(t1),
-            min_x = min(x2), max_x = max(x2),
-            min_y = min(y2), max_y = max(y2))
+# buffalo_CLR %>% dplyr::group_by(id) %>%  
+#   summarise(min_time = min(t1), max_time = max(t1),
+#             min_x = min(x2), max_x = max(x2),
+#             min_y = min(y2), max_y = max(y2))
 
-buffalo_CLR %>% filter(y == 1 & id == 2005) %>% ggplot(aes(x = x1, y = y1, colour = t1)) +
-  geom_point(alpha = 0.5) +
-  geom_path(alpha = 0.5) +
-  coord_equal() +
-  scale_y_continuous("Northing (m)") +
-  scale_x_continuous("Easting (m)") +
-  scale_colour_datetime() +
-  theme_bw() +
-  theme(legend.position = "none")
+# buffalo_CLR %>% filter(y == 1 & id == 2005) %>% ggplot(aes(x = x1, y = y1, colour = t1)) +
+#   geom_point(alpha = 0.5) +
+#   geom_path(alpha = 0.5) +
+#   coord_equal() +
+#   scale_y_continuous("Northing (m)") +
+#   scale_x_continuous("Easting (m)") +
+#   scale_colour_datetime() +
+#   theme_bw() +
+#   theme(legend.position = "none")
 
 # ggsave("outputs/plots/buffalo_data_id2005_20230309.png",
 #        width=150, height=90, units="mm", dpi = 300)
