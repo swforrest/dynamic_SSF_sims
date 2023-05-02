@@ -3,6 +3,8 @@ title: "SSF stan"
 author: "Scott Forrest"
 date: "`r Sys.Date()`"
 output: html_document
+editor_options: 
+  chunk_output_type: inline
 ---
 
 ```{r setup, include=FALSE}
@@ -39,7 +41,9 @@ Creating stan-specific covariates (i.e. something like a design matrix)
 
 ```{r}
 
-buffalo_CLR_year %>% mutate(ndvi_s1 = ndvi_scaled[,1] * yday_s1,
+buffalo_CLR_year <- buffalo_CLR_year %>% mutate(
+  
+                            ndvi_s1 = ndvi_scaled[,1] * yday_s1,
                             ndvi_s2 = ndvi_scaled[,1] * yday_s2,
                             ndvi_s3 = ndvi_scaled[,1] * yday_s3,
                             ndvi_s4 = ndvi_scaled[,1] * yday_s4,
@@ -82,7 +86,12 @@ buffalo_CLR_year %>% mutate(ndvi_s1 = ndvi_scaled[,1] * yday_s1,
                             cos_ta_c1 = cos_ta * yday_c1,
                             cos_ta_c2 = cos_ta * yday_c2,
                             cos_ta_c3 = cos_ta * yday_c3,
-                            cos_ta_c4 = cos_ta * yday_c4)
+                            cos_ta_c4 = cos_ta * yday_c4
+                            
+                            )
+
+# plot(buffalo_CLR_year$yday, buffalo_CLR_year$ndvi_s1)
+# plot(buffalo_CLR_year$yday, buffalo_CLR_year$ndvi_s2)
 
 ```
 
@@ -139,6 +148,19 @@ ggplot() +
 
 ```
 
+Thinning the pseudo-absences
+
+```{r}
+
+buffalo_CLR_year %>% dplyr::group_by(id, step_id) %>% dplyr::summarise(n=n())
+buffalo_CLR_year_3pts <- buffalo_CLR_year %>% dplyr::group_by(id, step_id) %>% dplyr::slice_head(n = 4) %>%  # only keep 3 random points per used point
+  dplyr::ungroup()
+
+head(buffalo_CLR_year_3pts)
+
+```
+
+
 Create a subset of the data to use in the stan model
 
 ```{r}
@@ -149,21 +171,82 @@ Create a subset of the data to use in the stan model
 #   mutate(id_num = as.numeric(factor(id)), step_id = step_id_, log_sl = log_sl_, cos_ta = cos_ta_) %>% 
 #   dplyr::select(id, id_num, ndvi_temporal, ndwi_temporal, y, step_id)
 
-buffalo_subset <- buffalo_CLR_year %>%
-  # filter(year == 2019) %>% # & (id == 2005 | id == 2018) & (month == 11)
+buffalo_subset <- buffalo_CLR_year_3pts %>%
+  # filter(year == 2019 & month == 11) %>% 
+  filter(id == 2005 | id == 2014)  %>% 
   mutate(id_num = as.numeric(factor(id))) %>% 
-  dplyr::select(id, id_num, ndvi_scaled, herby_scaled, canopy_scaled, y, step_id, step_aligned, sl, log_sl, cos_ta) %>% 
+  dplyr::select(id, 
+                id_num, 
+                
+                ndvi_scaled, 
+                ndvi_s1,
+                ndvi_s2,
+                ndvi_s3,
+                ndvi_s4,
+                ndvi_c1,
+                ndvi_c2,
+                ndvi_c3,
+                ndvi_c4,
+                
+                # herby_scaled, 
+                
+                canopy_scaled,
+                canopy_s1,
+                canopy_s2,
+                canopy_s3,
+                canopy_s4,
+                canopy_c1,
+                canopy_c2,
+                canopy_c3,
+                canopy_c4,
+                
+                y, 
+                step_id, 
+                step_aligned,
+                
+                sl, 
+                sl_s1,
+                sl_s2,
+                sl_s3,
+                sl_s4,
+                sl_c1,
+                sl_c2,
+                sl_c3,
+                sl_c4,
+                
+                log_sl, 
+                log_sl_s1,
+                log_sl_s2,
+                log_sl_s3,
+                log_sl_s4,
+                log_sl_c1,
+                log_sl_c2,
+                log_sl_c3,
+                log_sl_c4,
+                
+                cos_ta,
+                cos_ta_s1,
+                cos_ta_s2,
+                cos_ta_s3,
+                cos_ta_s4,
+                cos_ta_c1,
+                cos_ta_c2,
+                cos_ta_c3,
+                cos_ta_c4) %>% 
   drop_na(cos_ta)
 
 sum(is.na(buffalo_subset$cos_ta))
 
-ggplot() +
-  geom_point(data = buffalo_subset, aes(x = step_id, y = factor(id_num))) +
-  theme_classic()
+unique(buffalo_subset$id)
+unique(buffalo_subset$id_num)
 
-ggplot() +
-  geom_point(data = buffalo_subset, aes(x = step_aligned, y = factor(id_num))) +
-  theme_classic()
+# ggplot() +
+#   geom_point(data = buffalo_subset, aes(x = step_id, y = factor(id_num))) +
+#   theme_classic()
+# 
+# ggplot() +
+#   geom_point(data = buffalo_subset, aes(x = step_aligned, y = factor(id_num))) +
+#   theme_classic()
 
 ```
 
@@ -213,7 +296,7 @@ model {
   //sigmaind ~ inv_gamma(0.01, 0.01);  
   // unpopular - half-normal / T instead (lower = 0) - try tight parameters
 
-  sigmaind ~ normal(0.0, 1); 
+  sigmaind ~ normal(0.0, 1.0); 
   beta ~ normal(0.0, 1.0);
   a_re ~ normal(0.0, 1000000.0);
   i_re_ndvi ~ normal(0.0, sigmaind);
@@ -326,7 +409,7 @@ stan_dat <- list(N = nrow(buffalo_subset),
 ```{r}
 
 tic()
-res_stan_mvmt <- sampling(stan_mod, stan_dat, cores = 4, chains = 1, iter = 100)
+res_stan_mvmt <- sampling(stan_mod, stan_dat, cores = 4, chains = 1, iter = 200)
 toc()
 
 # system("killall R")
@@ -340,14 +423,14 @@ Checking summaries and sampling diagnostics
 
 ```{r}
 
-summary(res_stan)$summary[1:10, ]
-tail(summary(res_stan)$summary)
-traceplot(res_stan,pars=c("beta[1]", "beta[2]", "beta[3]", "a_re[1]", "a_re[2]"))
+summary(res_stan_mvmt)$summary[1:10, ]
+tail(summary(res_stan_mvmt)$summary)
+traceplot(res_stan_mvmt,pars=c("beta[1]", "beta[2]", "beta[3]", "a_re[1]", "a_re[2]"))
 
 # print(res_stan)
-plot(res_stan, pars = "beta")
-plot(res_stan, pars = "beta", plotfun = "stan_hist")
-extract(res_stan, pars = "beta")
+plot(res_stan_mvmt, pars = "beta")
+plot(res_stan_mvmt, pars = "beta", plotfun = "stan_hist")
+extract(res_stan_mvmt, pars = "beta")
 
 ```
 
@@ -434,7 +517,7 @@ parameters {
   vector[J] i_re_cos_ta_c1; // RE effects for each individual - cos_ta yday_cos_1 term
   vector[J] i_re_cos_ta_c2; // RE effects for each individual - cos_ta yday_cos_2 term
   
-  real<lower = 0.0> sigmaind;
+  real<lower = 0.0> sigmaind; // 
   
 }
 
@@ -448,9 +531,10 @@ model {
   //sigmaind ~ inv_gamma(0.01, 0.01);  
   // unpopular - half-normal / T instead (lower = 0) - try tight parameters
 
-  sigmaind ~ normal(0.0, 1); 
+  sigmaind ~ normal(0.0, 1.0); 
   beta ~ normal(0.0, 1.0);
   a_re ~ normal(0.0, 1000000.0);
+  
   i_re_ndvi ~ normal(0.0, sigmaind);
   i_re_ndvi_s1 ~ normal(0.0, sigmaind);
   i_re_ndvi_s2 ~ normal(0.0, sigmaind);
@@ -490,34 +574,34 @@ model {
     mu =  a_re[stepid[i]] + 
     
     (beta[1] + i_re_ndvi[indid[i]]) * ndvi[i] + 
-    (beta[2] + i_re_ndvi_s1[indid[i]]) * (ndvi_s1[i]) + 
-    (beta[3] + i_re_ndvi_s2[indid[i]]) * (ndvi_s2[i]) + 
-    (beta[4] + i_re_ndvi_c1[indid[i]]) * (ndvi_c1[i]) + 
-    (beta[5] + i_re_ndvi_c2[indid[i]]) * (ndvi_c2[i]) + 
+    (beta[2] + i_re_ndvi_s1[indid[i]]) * ndvi_s1[i] +
+    (beta[3] + i_re_ndvi_s2[indid[i]]) * ndvi_s2[i] +
+    (beta[4] + i_re_ndvi_c1[indid[i]]) * ndvi_c1[i] +
+    (beta[5] + i_re_ndvi_c2[indid[i]]) * ndvi_c2[i] +
     
     (beta[6] + i_re_canopy[indid[i]]) * canopy[i] + 
-    (beta[7] + i_re_canopy_s1[indid[i]]) * (canopy_s1[i]) + 
-    (beta[8] + i_re_canopy_s2[indid[i]]) * (canopy_s2[i]) + 
-    (beta[9] + i_re_canopy_c1[indid[i]]) * (canopy_c1[i]) + 
-    (beta[10] + i_re_canopy_c2[indid[i]]) * (canopy_c2[i]) + 
+    (beta[7] + i_re_canopy_s1[indid[i]]) * canopy_s1[i] + 
+    (beta[8] + i_re_canopy_s2[indid[i]]) * canopy_s2[i] + 
+    (beta[9] + i_re_canopy_c1[indid[i]]) * canopy_c1[i] + 
+    (beta[10] + i_re_canopy_c2[indid[i]]) * canopy_c2[i] + 
     
     (beta[11] + i_re_sl[indid[i]]) * sl[i] + 
-    (beta[12] + i_re_sl_s1[indid[i]]) * (sl_s1[i]) + 
-    (beta[13] + i_re_sl_s2[indid[i]]) * (sl_s2[i]) + 
-    (beta[14] + i_re_sl_c1[indid[i]]) * (sl_c1[i]) + 
-    (beta[15] + i_re_sl_c2[indid[i]]) * (sl_c2[i]) + 
+    (beta[12] + i_re_sl_s1[indid[i]]) * sl_s1[i] + 
+    (beta[13] + i_re_sl_s2[indid[i]]) * sl_s2[i] + 
+    (beta[14] + i_re_sl_c1[indid[i]]) * sl_c1[i] + 
+    (beta[15] + i_re_sl_c2[indid[i]]) * sl_c2[i] + 
     
     (beta[16] + i_re_log_sl[indid[i]]) * log_sl[i] + 
-    (beta[17] + i_re_log_sl_s1[indid[i]]) * (log_sl_s1[i]) + 
-    (beta[18] + i_re_log_sl_s2[indid[i]]) * (log_sl_s2[i]) + 
-    (beta[19] + i_re_log_sl_c1[indid[i]]) * (log_sl_c1[i]) + 
-    (beta[20] + i_re_log_sl_c2[indid[i]]) * (log_sl_c2[i]) + 
+    (beta[17] + i_re_log_sl_s1[indid[i]]) * log_sl_s1[i] + 
+    (beta[18] + i_re_log_sl_s2[indid[i]]) * log_sl_s2[i] + 
+    (beta[19] + i_re_log_sl_c1[indid[i]]) * log_sl_c1[i] + 
+    (beta[20] + i_re_log_sl_c2[indid[i]]) * log_sl_c2[i] + 
     
     (beta[21] + i_re_cos_ta[indid[i]]) * cos_ta[i] +
-    (beta[22] + i_re_cos_ta_s1[indid[i]]) * (cos_ta_s1[i]) + 
-    (beta[23] + i_re_cos_ta_s2[indid[i]]) * (cos_ta_s2[i]) + 
-    (beta[24] + i_re_cos_ta_c1[indid[i]]) * (cos_ta_c1[i]) + 
-    (beta[25] + i_re_cos_ta_c2[indid[i]]) * (cos_ta_c2[i]);
+    (beta[22] + i_re_cos_ta_s1[indid[i]]) * cos_ta_s1[i] + 
+    (beta[23] + i_re_cos_ta_s2[indid[i]]) * cos_ta_s2[i] + 
+    (beta[24] + i_re_cos_ta_c1[indid[i]]) * cos_ta_c1[i] + 
+    (beta[25] + i_re_cos_ta_c2[indid[i]]) * cos_ta_c2[i];
 
     y[i] ~ poisson_log(mu);
 
@@ -529,6 +613,371 @@ model {
 ```
 
 
+Stan model with harmonics with QR reparameterisation
+
+```{r}
+
+model <- "data {
+  
+  int<lower=1> N; // no data points
+  int<lower=1> I; // no steps (over all individuals)
+  int<lower=1> J; // no individuals
+  
+  int<lower=0> y[N]; // response
+  
+  real ndvi[N]; // covariate
+  real ndvi_s1[N];
+  real ndvi_s2[N];
+  real ndvi_c1[N];
+  real ndvi_c2[N]; 
+    
+  real canopy[N]; // covariate
+  real canopy_s1[N];
+  real canopy_s2[N];
+  real canopy_c1[N];
+  real canopy_c2[N]; 
+  
+  real sl[N]; // movement covariate
+  real sl_s1[N];
+  real sl_s2[N];
+  real sl_c1[N];
+  real sl_c2[N]; 
+  
+  real log_sl[N]; // movement covariate
+  real log_sl_s1[N];
+  real log_sl_s2[N];
+  real log_sl_c1[N];
+  real log_sl_c2[N]; 
+  
+  real cos_ta[N]; // movement covariate
+  real cos_ta_s1[N];
+  real cos_ta_s2[N];
+  real cos_ta_c1[N];
+  real cos_ta_c2[N]; 
+  
+  int<lower=1, upper=I> stepid[N]; // step id
+  int<lower=1, upper=J> indid[N]; // individual id
+  
+}
+
+parameters {
+
+  vector[25] beta; // fixed effects
+  vector[I] a_re; // RE for steps
+  
+  vector[J] i_re_ndvi; // RE effects for each individual - NDVI
+  vector[J] i_re_ndvi_s1; // RE effects for each individual - NDVI yday_sin_1 term
+  vector[J] i_re_ndvi_s2; // RE effects for each individual - NDVI yday_sin_2 term
+  vector[J] i_re_ndvi_c1; // RE effects for each individual - NDVI yday_cos_1 term
+  vector[J] i_re_ndvi_c2; // RE effects for each individual - NDVI yday_cos_2 term
+  
+  vector[J] i_re_canopy; // RE effects for each individual - Canopy cover
+  vector[J] i_re_canopy_s1; // RE effects for each individual - canopy yday_sin_1 term
+  vector[J] i_re_canopy_s2; // RE effects for each individual - canopy yday_sin_2 term
+  vector[J] i_re_canopy_c1; // RE effects for each individual - canopy yday_cos_1 term
+  vector[J] i_re_canopy_c2; // RE effects for each individual - canopy yday_cos_2 term
+  
+  vector[J] i_re_sl; // RE effects for each individual - Step length
+  vector[J] i_re_sl_s1; // RE effects for each individual - sl yday_sin_1 term
+  vector[J] i_re_sl_s2; // RE effects for each individual - sl yday_sin_2 term
+  vector[J] i_re_sl_c1; // RE effects for each individual - sl yday_cos_1 term
+  vector[J] i_re_sl_c2; // RE effects for each individual - sl yday_cos_2 term
+  
+  vector[J] i_re_log_sl; // RE effects for each individual - Log of step length
+  vector[J] i_re_log_sl_s1; // RE effects for each individual - log_sl yday_sin_1 term
+  vector[J] i_re_log_sl_s2; // RE effects for each individual - log_sl yday_sin_2 term
+  vector[J] i_re_log_sl_c1; // RE effects for each individual - log_sl yday_cos_1 term
+  vector[J] i_re_log_sl_c2; // RE effects for each individual - log_sl yday_cos_2 term
+  
+  vector[J] i_re_cos_ta; // RE effects for each individual - Cos of turning angle
+  vector[J] i_re_cos_ta_s1; // RE effects for each individual - cos_ta yday_sin_1 term
+  vector[J] i_re_cos_ta_s2; // RE effects for each individual - cos_ta yday_sin_2 term
+  vector[J] i_re_cos_ta_c1; // RE effects for each individual - cos_ta yday_cos_1 term
+  vector[J] i_re_cos_ta_c2; // RE effects for each individual - cos_ta yday_cos_2 term
+  
+  real<lower = 0.0> sigmaind; // 
+  
+}
+
+
+model {
+
+  real mu;
+  
+  // priors
+  // maybe add a prior for sd here
+  //sigmaind ~ inv_gamma(0.01, 0.01);  
+  // unpopular - half-normal / T instead (lower = 0) - try tight parameters
+
+  sigmaind ~ normal(0.0, 1.0); 
+  beta ~ normal(0.0, 1.0);
+  a_re ~ normal(0.0, 1000000.0);
+  
+  i_re_ndvi ~ normal(0.0, sigmaind);
+  i_re_ndvi_s1 ~ normal(0.0, sigmaind);
+  i_re_ndvi_s2 ~ normal(0.0, sigmaind);
+  i_re_ndvi_c1 ~ normal(0.0, sigmaind);
+  i_re_ndvi_c2 ~ normal(0.0, sigmaind);
+  
+  i_re_canopy ~ normal(0.0, sigmaind);
+  i_re_canopy_s1 ~ normal(0.0, sigmaind);
+  i_re_canopy_s2 ~ normal(0.0, sigmaind);
+  i_re_canopy_c1 ~ normal(0.0, sigmaind);
+  i_re_canopy_c2 ~ normal(0.0, sigmaind);
+    
+  i_re_sl ~ normal(0.0, sigmaind);
+  i_re_sl_s1 ~ normal(0.0, sigmaind);
+  i_re_sl_s2 ~ normal(0.0, sigmaind);
+  i_re_sl_c1 ~ normal(0.0, sigmaind);
+  i_re_sl_c2 ~ normal(0.0, sigmaind);
+    
+  i_re_log_sl ~ normal(0.0, sigmaind);
+  i_re_log_sl_s1 ~ normal(0.0, sigmaind);
+  i_re_log_sl_s2 ~ normal(0.0, sigmaind);
+  i_re_log_sl_c1 ~ normal(0.0, sigmaind);
+  i_re_log_sl_c2 ~ normal(0.0, sigmaind);
+    
+  i_re_cos_ta ~ normal(0.0, sigmaind);
+  i_re_cos_ta_s1 ~ normal(0.0, sigmaind);
+  i_re_cos_ta_s2 ~ normal(0.0, sigmaind);
+  i_re_cos_ta_c1 ~ normal(0.0, sigmaind);
+  i_re_cos_ta_c2 ~ normal(0.0, sigmaind);
+  
+
+  //likelihood
+
+
+  for (i in 1:N) {
+
+    mu =  a_re[stepid[i]] + 
+    
+    (beta[1] + i_re_ndvi[indid[i]]) * ndvi[i] + 
+    (beta[2] + i_re_ndvi_s1[indid[i]]) * ndvi_s1[i] +
+    (beta[3] + i_re_ndvi_s2[indid[i]]) * ndvi_s2[i] +
+    (beta[4] + i_re_ndvi_c1[indid[i]]) * ndvi_c1[i] +
+    (beta[5] + i_re_ndvi_c2[indid[i]]) * ndvi_c2[i] +
+    
+    (beta[6] + i_re_canopy[indid[i]]) * canopy[i] + 
+    (beta[7] + i_re_canopy_s1[indid[i]]) * canopy_s1[i] + 
+    (beta[8] + i_re_canopy_s2[indid[i]]) * canopy_s2[i] + 
+    (beta[9] + i_re_canopy_c1[indid[i]]) * canopy_c1[i] + 
+    (beta[10] + i_re_canopy_c2[indid[i]]) * canopy_c2[i] + 
+    
+    (beta[11] + i_re_sl[indid[i]]) * sl[i] + 
+    (beta[12] + i_re_sl_s1[indid[i]]) * sl_s1[i] + 
+    (beta[13] + i_re_sl_s2[indid[i]]) * sl_s2[i] + 
+    (beta[14] + i_re_sl_c1[indid[i]]) * sl_c1[i] + 
+    (beta[15] + i_re_sl_c2[indid[i]]) * sl_c2[i] + 
+    
+    (beta[16] + i_re_log_sl[indid[i]]) * log_sl[i] + 
+    (beta[17] + i_re_log_sl_s1[indid[i]]) * log_sl_s1[i] + 
+    (beta[18] + i_re_log_sl_s2[indid[i]]) * log_sl_s2[i] + 
+    (beta[19] + i_re_log_sl_c1[indid[i]]) * log_sl_c1[i] + 
+    (beta[20] + i_re_log_sl_c2[indid[i]]) * log_sl_c2[i] + 
+    
+    (beta[21] + i_re_cos_ta[indid[i]]) * cos_ta[i] +
+    (beta[22] + i_re_cos_ta_s1[indid[i]]) * cos_ta_s1[i] + 
+    (beta[23] + i_re_cos_ta_s2[indid[i]]) * cos_ta_s2[i] + 
+    (beta[24] + i_re_cos_ta_c1[indid[i]]) * cos_ta_c1[i] + 
+    (beta[25] + i_re_cos_ta_c2[indid[i]]) * cos_ta_c2[i];
+
+    y[i] ~ poisson_log(mu);
+
+  }
+
+}
+"
+
+```
+
+
+with commented out harmonics
+
+```{r}
+
+model <- "data {
+  
+  int<lower=1> N; // no data points
+  int<lower=1> I; // no steps (over all individuals)
+  int<lower=1> J; // no individuals
+  
+  int<lower=0> y[N]; // response
+  
+  real ndvi[N]; // covariate
+  real ndvi_s1[N];
+  //real ndvi_s2[N];
+  real ndvi_c1[N];
+  //real ndvi_c2[N]; 
+    
+  real canopy[N]; // covariate
+  real canopy_s1[N];
+  //real canopy_s2[N];
+  real canopy_c1[N];
+  //real canopy_c2[N]; 
+  
+  real sl[N]; // movement covariate
+  real sl_s1[N];
+  //real sl_s2[N];
+  real sl_c1[N];
+  //real sl_c2[N]; 
+  
+  real log_sl[N]; // movement covariate
+  real log_sl_s1[N];
+  //real log_sl_s2[N];
+  real log_sl_c1[N];
+  //real log_sl_c2[N]; 
+  
+  real cos_ta[N]; // movement covariate
+  real cos_ta_s1[N];
+  //real cos_ta_s2[N];
+  real cos_ta_c1[N];
+  //real cos_ta_c2[N]; 
+  
+  int<lower=1, upper=I> stepid[N]; // step id
+  int<lower=1, upper=J> indid[N]; // individual id
+  
+}
+
+parameters {
+
+  vector[25] beta; // fixed effects
+  vector[I] a_re; // RE for steps
+  
+  vector[J] i_re_ndvi; // RE effects for each individual - NDVI
+  vector[J] i_re_ndvi_s1; // RE effects for each individual - NDVI yday_sin_1 term
+  //vector[J] i_re_ndvi_s2; // RE effects for each individual - NDVI yday_sin_2 term
+  vector[J] i_re_ndvi_c1; // RE effects for each individual - NDVI yday_cos_1 term
+  //vector[J] i_re_ndvi_c2; // RE effects for each individual - NDVI yday_cos_2 term
+  
+  vector[J] i_re_canopy; // RE effects for each individual - Canopy cover
+  vector[J] i_re_canopy_s1; // RE effects for each individual - canopy yday_sin_1 term
+  //vector[J] i_re_canopy_s2; // RE effects for each individual - canopy yday_sin_2 term
+  vector[J] i_re_canopy_c1; // RE effects for each individual - canopy yday_cos_1 term
+  //vector[J] i_re_canopy_c2; // RE effects for each individual - canopy yday_cos_2 term
+  
+  vector[J] i_re_sl; // RE effects for each individual - Step length
+  vector[J] i_re_sl_s1; // RE effects for each individual - sl yday_sin_1 term
+  //vector[J] i_re_sl_s2; // RE effects for each individual - sl yday_sin_2 term
+  vector[J] i_re_sl_c1; // RE effects for each individual - sl yday_cos_1 term
+  //vector[J] i_re_sl_c2; // RE effects for each individual - sl yday_cos_2 term
+  
+  vector[J] i_re_log_sl; // RE effects for each individual - Log of step length
+  vector[J] i_re_log_sl_s1; // RE effects for each individual - log_sl yday_sin_1 term
+  //vector[J] i_re_log_sl_s2; // RE effects for each individual - log_sl yday_sin_2 term
+  vector[J] i_re_log_sl_c1; // RE effects for each individual - log_sl yday_cos_1 term
+  //vector[J] i_re_log_sl_c2; // RE effects for each individual - log_sl yday_cos_2 term
+  
+  vector[J] i_re_cos_ta; // RE effects for each individual - Cos of turning angle
+  vector[J] i_re_cos_ta_s1; // RE effects for each individual - cos_ta yday_sin_1 term
+  //vector[J] i_re_cos_ta_s2; // RE effects for each individual - cos_ta yday_sin_2 term
+  vector[J] i_re_cos_ta_c1; // RE effects for each individual - cos_ta yday_cos_1 term
+  //vector[J] i_re_cos_ta_c2; // RE effects for each individual - cos_ta yday_cos_2 term
+  
+  real<lower = 0.0> sigmaind; // 
+  
+}
+
+
+model {
+
+  real mu;
+  
+  // priors
+  // maybe add a prior for sd here
+  //sigmaind ~ inv_gamma(0.01, 0.01);  
+  // unpopular - half-normal / T instead (lower = 0) - try tight parameters
+
+  sigmaind ~ normal(0.0, 10.0); 
+  beta ~ normal(0.0, 1.0);
+  a_re ~ normal(0.0, 1000000.0);
+  i_re_ndvi ~ normal(0.0, sigmaind);
+  i_re_ndvi_s1 ~ normal(0.0, sigmaind);
+  //i_re_ndvi_s2 ~ normal(0.0, sigmaind);
+  i_re_ndvi_c1 ~ normal(0.0, sigmaind);
+  //i_re_ndvi_c2 ~ normal(0.0, sigmaind);
+  
+  i_re_canopy ~ normal(0.0, sigmaind);
+  i_re_canopy_s1 ~ normal(0.0, sigmaind);
+  //i_re_canopy_s2 ~ normal(0.0, sigmaind);
+  i_re_canopy_c1 ~ normal(0.0, sigmaind);
+  //i_re_canopy_c2 ~ normal(0.0, sigmaind);
+    
+  i_re_sl ~ normal(0.0, sigmaind);
+  i_re_sl_s1 ~ normal(0.0, sigmaind);
+  //i_re_sl_s2 ~ normal(0.0, sigmaind);
+  i_re_sl_c1 ~ normal(0.0, sigmaind);
+  //i_re_sl_c2 ~ normal(0.0, sigmaind);
+    
+  i_re_log_sl ~ normal(0.0, sigmaind);
+  i_re_log_sl_s1 ~ normal(0.0, sigmaind);
+  //i_re_log_sl_s2 ~ normal(0.0, sigmaind);
+  i_re_log_sl_c1 ~ normal(0.0, sigmaind);
+  //i_re_log_sl_c2 ~ normal(0.0, sigmaind);
+    
+  i_re_cos_ta ~ normal(0.0, sigmaind);
+  i_re_cos_ta_s1 ~ normal(0.0, sigmaind);
+  //i_re_cos_ta_s2 ~ normal(0.0, sigmaind);
+  i_re_cos_ta_c1 ~ normal(0.0, sigmaind);
+  //i_re_cos_ta_c2 ~ normal(0.0, sigmaind);
+  
+
+  //likelihood
+
+
+  for (i in 1:N) {
+
+    mu =  a_re[stepid[i]] + 
+    
+    (beta[1] + i_re_ndvi[indid[i]]) * ndvi[i] + 
+    (beta[2] + i_re_ndvi_s1[indid[i]]) * ndvi_s1[i] + 
+    //(beta[3] + i_re_ndvi_s2[indid[i]]) * ndvi_s2[i] + 
+    (beta[4] + i_re_ndvi_c1[indid[i]]) * ndvi_c1[i] + 
+    //(beta[5] + i_re_ndvi_c2[indid[i]]) * ndvi_c2[i] + 
+    
+    (beta[6] + i_re_canopy[indid[i]]) * canopy[i] + 
+    (beta[7] + i_re_canopy_s1[indid[i]]) * canopy_s1[i] + 
+    //(beta[8] + i_re_canopy_s2[indid[i]]) * canopy_s2[i] + 
+    (beta[9] + i_re_canopy_c1[indid[i]]) * canopy_c1[i] + 
+    //(beta[10] + i_re_canopy_c2[indid[i]]) * canopy_c2[i] + 
+    
+    (beta[11] + i_re_sl[indid[i]]) * sl[i] + 
+    (beta[12] + i_re_sl_s1[indid[i]]) * sl_s1[i] + 
+    //(beta[13] + i_re_sl_s2[indid[i]]) * sl_s2[i] + 
+    (beta[14] + i_re_sl_c1[indid[i]]) * sl_c1[i] + 
+    //(beta[15] + i_re_sl_c2[indid[i]]) * sl_c2[i] + 
+    
+    (beta[16] + i_re_log_sl[indid[i]]) * log_sl[i] + 
+    (beta[17] + i_re_log_sl_s1[indid[i]]) * log_sl_s1[i] + 
+    //(beta[18] + i_re_log_sl_s2[indid[i]]) * log_sl_s2[i] + 
+    (beta[19] + i_re_log_sl_c1[indid[i]]) * log_sl_c1[i] + 
+    //(beta[20] + i_re_log_sl_c2[indid[i]]) * log_sl_c2[i] + 
+    
+    (beta[21] + i_re_cos_ta[indid[i]]) * cos_ta[i] +
+    (beta[22] + i_re_cos_ta_s1[indid[i]]) * cos_ta_s1[i] + 
+    //(beta[23] + i_re_cos_ta_s2[indid[i]]) * cos_ta_s2[i] + 
+    (beta[24] + i_re_cos_ta_c1[indid[i]]) * cos_ta_c1[i]; // + 
+    //(beta[25] + i_re_cos_ta_c2[indid[i]]) * cos_ta_c2[i];
+
+    y[i] ~ poisson_log(mu);
+
+  }
+
+}
+"
+
+```
+
+
+Prior predictive
+
+```{r}
+
+
+
+```
+
+
+
 Compiling the model
 
 ```{r}
@@ -537,6 +986,8 @@ Compiling the model
 tic()
 stan_mod <- stan_model(model_code = model)
 toc()
+
+stan_mod@model_code
 
 # stancode <- 'data {real y_mean;} parameters {real y;} model {y ~ normal(y_mean,1);}'
 # mod <- stan_model(model_code = stancode, verbose = TRUE)
@@ -553,12 +1004,39 @@ stan_dat <- list(N = nrow(buffalo_subset),
                  I = length(unique(buffalo_subset$step_aligned)), 
                  J = length(unique(buffalo_subset$id_num)), 
                  y = buffalo_subset$y, 
+                 
                  ndvi = buffalo_subset$ndvi_scaled[,1], 
+                 ndvi_s1 = buffalo_subset$ndvi_s1, 
+                 ndvi_s2 = buffalo_subset$ndvi_s2, 
+                 ndvi_c1 = buffalo_subset$ndvi_c1, 
+                 ndvi_c2 = buffalo_subset$ndvi_c2,
+                 
                  #herby = buffalo_subset$herby_scaled[,1],
+                 
                  canopy = buffalo_subset$canopy_scaled[,1],
+                 canopy_s1 = buffalo_subset$canopy_s1, 
+                 canopy_s2 = buffalo_subset$canopy_s2, 
+                 canopy_c1 = buffalo_subset$canopy_c1, 
+                 canopy_c2 = buffalo_subset$canopy_c2,
+                 
                  sl = buffalo_subset$sl,
+                 sl_s1 = buffalo_subset$sl_s1, 
+                 sl_s2 = buffalo_subset$sl_s2, 
+                 sl_c1 = buffalo_subset$sl_c1, 
+                 sl_c2 = buffalo_subset$sl_c2,
+                 
                  log_sl = buffalo_subset$log_sl,
+                 log_sl_s1 = buffalo_subset$log_sl_s1, 
+                 log_sl_s2 = buffalo_subset$log_sl_s2, 
+                 log_sl_c1 = buffalo_subset$log_sl_c1, 
+                 log_sl_c2 = buffalo_subset$log_sl_c2,
+                 
                  cos_ta = buffalo_subset$cos_ta,
+                 cos_ta_s1 = buffalo_subset$cos_ta_s1, 
+                 cos_ta_s2 = buffalo_subset$cos_ta_s2, 
+                 cos_ta_c1 = buffalo_subset$cos_ta_c1, 
+                 cos_ta_c2 = buffalo_subset$cos_ta_c2,
+                 
                  stepid = as.numeric(factor(buffalo_subset$step_aligned)), 
                  indid = buffalo_subset$id_num)
 
@@ -569,7 +1047,7 @@ stan_dat <- list(N = nrow(buffalo_subset),
 ```{r}
 
 tic()
-res_stan_mvmt <- sampling(stan_mod, stan_dat, cores = 4, chains = 1, iter = 100)
+res_stan_mvmt <- sampling(stan_mod, stan_dat, cores = 4, chains = 2, iter = 100)
 toc()
 
 # system("killall R")
@@ -580,19 +1058,25 @@ beep(sound = 2)
 ```
 
 
-
 ```{r}
 
-summary(res_stan)$summary[1:10, ]
-tail(summary(res_stan)$summary)
-traceplot(res_stan,pars=c("beta[1]", "beta[2]", "beta[3]", "a_re[1]", "a_re[2]"))
+model <- res_stan_mvmt
+
+summary(model)$summary[1:10, ]
+tail(summary(model)$summary)
+traceplot(model,pars=c("beta[1]", "beta[2]", "beta[3]", "a_re[1]", "a_re[2]", "a_re[3]"))
 
 # print(res_stan)
-plot(res_stan, pars = "beta")
-plot(res_stan, pars = "beta", plotfun = "stan_hist")
-extract(res_stan, pars = "beta")
+plot(model, pars = "beta")
+plot(model, pars = "beta", plotfun = "stan_hist")
+# extract(model, pars = "beta")
+
+# check diagnostics and samples using the shiny stan app
+launch_shinystan(model)
 
 ```
+
+
 
 ```{r}
 
