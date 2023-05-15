@@ -21,26 +21,43 @@ Running an INLA model with:
 - with 2 harmonics
 
 
-```{r message = FALSE}
+```{r}
+# message = FALSE
 # devtools::install_github("jmsigner/amt")
 # install.packages("amt")
 
 # install.packages("mapedit")
-# install.packages("brms")
+# devtools::install_github("julianfaraway/brinla")
 
 library(tidyverse)
 
-packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", "RColorBrewer", "patchwork", "ecospat", "ggmap", "basemaps", "mapedit", "sf", "brms", "rstan", "gganimate", "splines", "INLA")
+packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", "RColorBrewer", "patchwork", "ecospat", "ggmap", "basemaps", "mapedit", "sf", "brms", "rstan", "gganimate", "splines", "INLA", "brinla", "beepr")
 walk(packages, require, character.only = T)
 
 ```
 
 
-Import buffalo telemetry data.
+Import buffalo telemetry data using the data prep script
+
+Thinning the pseudo-absences to reduce the size of the dataset
+
+```{r}
+
+buffalo_CLR_year_harmonics %>% dplyr::group_by(id, step_id) %>% dplyr::summarise(n=n())
+buffalo_CLR_year_3pts <- buffalo_CLR_year_harmonics %>% dplyr::group_by(id, step_id) %>% dplyr::slice_head(n = 4) %>%  
+  # only keep 3 random points per used point
+  dplyr::ungroup()
+
+head(buffalo_CLR_year_3pts)
+
+```
+
 
 ```{r message = FALSE}
 
-buffalo_inla <- buffalo_CLR_year %>% 
+# buffalo_inla <- buffalo_CLR_year_harmonics %>% 
+buffalo_inla <- buffalo_CLR_year_3pts %>% 
+  filter(id %in% c(2005, 2014, 2018)) %>% 
   mutate(id1 = as.numeric(as.factor(id)),
          id2 = id1,
          id3 = id1,
@@ -48,9 +65,12 @@ buffalo_inla <- buffalo_CLR_year %>%
          id5 = id1,
          id6 = id1,
          id7 = id1,
-         id8 = id1)
+         id8 = id1,
+         id9 = id1,
+         id10 = id1)
 
 ```
+
 
 
 ```{r}
@@ -169,6 +189,442 @@ buffalo_model %>% ggplot() +
 ```
 
 
+INLA model - with only linear terms
+
+```{r}
+
+n_indvs <- length(unique(buffalo_inla$id))
+
+# priors
+
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+# prec.beta.wofs05 <- 1e-4
+# prec.beta.wofs80 <- 1e-4
+# prec.beta.elev <- 1e-4
+# prec.beta.slope <- 1e-4
+# prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+
+
+# model formula
+
+formula.random <- y ~ -1 + 
+  
+  ndvi_scaled +
+  # WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  # elev_scaled +
+  # slope_scaled +
+  # veg_herby +
+  canopy_scaled +
+  sl +
+  # sl_scaled  +
+  log_sl +
+  cos_ta +
+
+  f(step_id, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  f(id1, ndvi_scaled, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="normal",param=c(0,1)))) +
+  
+  # f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor4, elev_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor5, slope_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor6, veg_herby, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id2, canopy_scaled, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="normal",param=c(0,1))))
+
+# fitting models
+
+tic()
+m_all <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_inla,
+              # verbose = T,
+              control.compute = list(dic = TRUE,
+                                     config = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_scaled = prec.beta.ndvi,
+                            # WOFS05_dist_scaled = prec.beta.wofs05,
+                            # WOFS80_dist_scaled = prec.beta.wofs80,
+                            # elev_scaled = prec.beta.elev,
+                            # slope_scaled = prec.beta.slope,
+                            # herby_scaled = prec.beta.herby,
+                            canopy_scaled = prec.beta.canopy)
+                )
+              )
+toc()
+
+# beep(sound = 2)
+
+summary(m_all)
+# m_all[[i]]$dic[[1]]
+m_all$summary.fixed
+
+bri.hyperpar.summary(m_all)
+bri.hyperpar.plot(m_all)
+# bri.random.plot(m_all)
+
+# Posterior of individuals intercepts for ndvi
+ggplot() + 
+  geom_line(data = as.data.frame(m_all$marginals.random$id1$index.1), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(m_all$marginals.random$id1$index.2), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(m_all$marginals.random$id1$index.3), aes(x = x, y = y))
+
+# Posterior of individuals intercepts for ndvi
+ggplot() + 
+  geom_line(data = as.data.frame(m_all$marginals.random$id2$index.1), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(m_all$marginals.random$id2$index.2), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(m_all$marginals.random$id2$index.3), aes(x = x, y = y))
+
+```
+
+INLA model - with quadratic terms
+
+```{r}
+
+# priors
+
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+prec.beta.ndvi2 <- 1e-4
+# prec.beta.wofs05 <- 1e-4
+# prec.beta.wofs80 <- 1e-4
+# prec.beta.elev <- 1e-4
+# prec.beta.slope <- 1e-4
+# prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+prec.beta.canopy2 <- 1e-4
+
+
+# model formula
+
+formula.random <- y ~ -1 + 
+  
+  ndvi_scaled +
+  ndvi_2 +
+  # WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  # elev_scaled +
+  # slope_scaled +
+  # veg_herby +
+  canopy_scaled +
+  canopy_2 +
+  sl +
+  # sl_scaled  +
+  log_sl +
+  cos_ta +
+
+  f(step_id, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  f(id1, ndvi_scaled, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id2, ndvi_2, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  # f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor4, elev_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor5, slope_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor6, veg_herby, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id3, canopy_scaled, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id4, canopy_2, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+
+# fitting model
+
+tic()
+inla_quads <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_inla,
+              # verbose = T,
+              control.inla = list(int.strategy="eb"),
+              control.compute = list(dic = TRUE,
+                                     config = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_scaled = prec.beta.ndvi,
+                            ndvi_2 = prec.beta.ndvi2,
+                            # WOFS05_dist_scaled = prec.beta.wofs05,
+                            # WOFS80_dist_scaled = prec.beta.wofs80,
+                            # elev_scaled = prec.beta.elev,
+                            # slope_scaled = prec.beta.slope,
+                            # herby_scaled = prec.beta.herby,
+                            canopy_scaled = prec.beta.canopy,
+                            canopy_2 = prec.beta.canopy2)))
+toc()
+
+beep(sound = 2)
+
+```
+
+
+Summaries of the model
+
+```{r}
+
+summary(inla_quads)
+# m_all[[i]]$dic[[1]]
+inla_quads$summary.fixed
+
+bri.fixed.plot(inla_quads)
+
+bri.hyperpar.summary(inla_quads)
+bri.hyperpar.plot(inla_quads)
+
+# Posterior of individuals intercepts for ndvi
+ggplot() + 
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id1$index.1), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id1$index.2), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id1$index.3), aes(x = x, y = y))
+
+# Posterior of individuals intercepts for ndvi^2
+ggplot() + 
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id2$index.1), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id2$index.2), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id2$index.3), aes(x = x, y = y))
+
+# Posterior of individuals intercepts for canopy
+ggplot() + 
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id3$index.1), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id3$index.2), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id3$index.3), aes(x = x, y = y))
+
+# Posterior of individuals intercepts for canopy^2
+ggplot() + 
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id4$index.1), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id4$index.2), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id4$index.3), aes(x = x, y = y))
+
+```
+
+INLA model - with harmonic terms
+
+```{r}
+
+# priors
+
+mean.beta <- 0
+prec.beta <- 1e-4
+prec.beta.ndvi <- 1e-4
+# prec.beta.ndvi2 <- 1e-4
+prec.beta.ndvi.s1 <- 1e-4
+prec.beta.ndvi.s2 <- 1e-4
+prec.beta.ndvi.c1 <- 1e-4
+prec.beta.ndvi.c2 <- 1e-4
+# prec.beta.wofs05 <- 1e-4
+# prec.beta.wofs80 <- 1e-4
+# prec.beta.elev <- 1e-4
+# prec.beta.slope <- 1e-4
+# prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+# prec.beta.canopy2 <- 1e-4
+prec.beta.canopy.s1 <- 1e-4
+prec.beta.canopy.s2 <- 1e-4
+prec.beta.canopy.c1 <- 1e-4
+prec.beta.canopy.c2 <- 1e-4
+
+
+# model formula
+
+formula.random <- y ~ -1 + 
+  
+  ndvi_scaled +
+  # ndvi_2 +
+  ndvi_s1 +
+  ndvi_s2 +
+  ndvi_c1 +
+  ndvi_c2 +
+  # WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  # elev_scaled +
+  # slope_scaled +
+  # veg_herby +
+  canopy_scaled +
+  # canopy_2 +
+  canopy_s1 +
+  canopy_s2 +
+  canopy_c1 +
+  canopy_c2 +
+  sl +
+  # sl_scaled  +
+  log_sl +
+  cos_ta +
+
+  f(step_id, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  f(id1, ndvi_scaled, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  # f(id2, ndvi_2, values=1:n_indvs,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id2, ndvi_s1, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id3, ndvi_s2, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id4, ndvi_c1, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id5, ndvi_c2, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  # f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor4, elev_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor5, slope_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor6, veg_herby, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id6, canopy_scaled, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  # f(id4, canopy_2, values=1:n_indvs,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+  
+  f(id7, canopy_s1, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id8, canopy_s2, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id9, canopy_c1, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id10, canopy_c2, values=1:n_indvs,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+
+# fitting model
+
+tic()
+inla_quads <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_inla,
+              # verbose = T,
+              control.inla = list(int.strategy = "eb"),
+              control.compute = list(dic = TRUE,
+                                     config = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = prec.beta))
+                  # list(ndvi_scaled = prec.beta.ndvi,
+                  #           # ndvi_2 = prec.beta.ndvi2,
+                  #           ndvi_s1 = prec.beta.ndvi.s1,
+                  #           ndvi_s2 = prec.beta.ndvi.s2,
+                  #           ndvi_c1 = prec.beta.ndvi.c1,
+                  #           ndvi_c2 = prec.beta.ndvi.c2,
+                  #           # WOFS05_dist_scaled = prec.beta.wofs05,
+                  #           # WOFS80_dist_scaled = prec.beta.wofs80,
+                  #           # elev_scaled = prec.beta.elev,
+                  #           # slope_scaled = prec.beta.slope,
+                  #           # herby_scaled = prec.beta.herby,
+                  #           canopy_scaled = prec.beta.canopy,
+                  #           # canopy_2 = prec.beta.canopy2,
+                  #           canopy_s1 = prec.beta.canopy.s1,
+                  #           canopy_s2 = prec.beta.canopy.s2,
+                  #           canopy_c1 = prec.beta.canopy.c1,
+                  #           canopy_c2 = prec.beta.canopy.c2)))
+toc()
+
+beep(sound = 2)
+
+```
+
+
+Summaries of the model
+
+```{r}
+
+summary(inla_quads)
+# m_all[[i]]$dic[[1]]
+inla_quads$summary.fixed
+
+bri.fixed.plot(inla_quads)
+
+bri.hyperpar.summary(inla_quads)
+bri.hyperpar.plot(inla_quads)
+
+# Posterior of individuals intercepts for ndvi
+ggplot() + 
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id1$index.1), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id1$index.2), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id1$index.3), aes(x = x, y = y))
+
+# Posterior of individuals intercepts for ndvi^2
+ggplot() + 
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id2$index.1), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id2$index.2), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id2$index.3), aes(x = x, y = y))
+
+# Posterior of individuals intercepts for canopy
+ggplot() + 
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id3$index.1), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id3$index.2), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id3$index.3), aes(x = x, y = y))
+
+# Posterior of individuals intercepts for canopy^2
+ggplot() + 
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id4$index.1), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id4$index.2), aes(x = x, y = y)) +
+  geom_line(data = as.data.frame(inla_quads$marginals.random$id4$index.3), aes(x = x, y = y))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 Running monthly INLA models in a loop
@@ -191,37 +647,39 @@ prec.beta.canopy <- 1e-4
 
 formula.random <- y ~ -1 + 
   
-  ndvi_temporal +
-  WOFS05_dist_scaled +
-  WOFS80_dist_scaled +
-  elev_scaled +
-  slope_scaled +
-  veg_herby +
-  canopy_01 +
+  ndvi_scaled +
+  # WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  # elev_scaled +
+  # slope_scaled +
+  # veg_herby +
+  canopy_scaled +
   sl +
   # sl_scaled  +
+  log_sl +
+  cos_ta +
 
-  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+  f(step_id, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
 
-  f(id_refactor1, ndvi_temporal, values=1:14,model="iid",
+  f(id_refactor1, ndvi_scaled, values=1:10,model="iid",
     hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
   
-  f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
-    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
-  
-  f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
-    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
-  
-  f(id_refactor4, elev_scaled, values=1:14,model="iid",
-    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
-  
-  f(id_refactor5, slope_scaled, values=1:14,model="iid",
-    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor4, elev_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor5, slope_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor6, veg_herby, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
 
-  f(id_refactor6, veg_herby, values=1:14,model="iid",
-    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
-
-  f(id_refactor7, canopy_01, values=1:14,model="iid",
+  f(id_refactor7, canopy_scaled, values=1:10,model="iid",
     hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
 
 
