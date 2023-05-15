@@ -24,7 +24,7 @@ library(tidyverse)
 
 packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", 
               "RColorBrewer", "patchwork", "ecospat", "ggmap", "basemaps", "mapedit", 
-              "sf", "ggpubr", "circular", "glmmTMB")
+              "sf", "ggpubr", "circular", "glmmTMB", "beepr")
 
 walk(packages, require, character.only = T)
 
@@ -171,6 +171,13 @@ coefs_df_function <- function(clogit_model) {
 # hist(buffalo_subset$canopy_scaled)
 
 ndvi_above0_stack_scaled <- rast("mapping/cropped rasters/ndvi_above0_stack_scaled_20230210.tif")
+
+ndvi_projected <- rast("mapping/cropped rasters/ndvi_GEE_projected_watermask20230207.tif")
+# scaling from the buffalo data
+scaling_mean <- as.numeric(attributes(buffalo_CLR_year$ndvi_scaled)[1]) # 0.3125089
+scaling_sd <- as.numeric(attributes(buffalo_CLR_year$ndvi_scaled)[2]) # 0.143179 for July 2018
+ndvi_stack_scaled <- (ndvi_projected - scaling_mean) / scaling_sd
+
 # slope <- rast("mapping/cropped rasters/slope_raster.tif")
 veg_herby <- rast("mapping/cropped rasters/veg_herby.tif")
 # canopy_cover <- rast("mapping/cropped rasters/canopy_cover.tif")
@@ -217,23 +224,25 @@ Writing to our model - single month
 
 ```{r}
 
-month_no <- 12
-buffalo_month_subset <- buffalo_CLR_year %>% filter(month == month_no)
+# month_no <- 12
+# buffalo_month_subset <- buffalo_CLR_year %>% filter(month == month_no)
+# buffalo_data <- buffalo_month_subset
 
 # using the full dataset
-buffalo_month_subset <- buffalo_CLR_year
+# buffalo_data <- buffalo_CLR_year
 
-buffalo_month_subset <- buffalo_subset # from the SSF stan code
+# using the full dataset with harmonics precomputed (using the stan script)
+buffalo_data <- buffalo_subset %>% mutate(sl_scaled = scale(sl)) # from the SSF stan code
 
 tic()
-glmmTMB_model_month1 <- glmmTMB(y ~ -1 +
+glmmTMB_model <- glmmTMB(y ~ -1 +
                            ndvi_scaled +
                             # I(ndvi_scaled^2) +
                              # poly(ndvi_scaled, degree = 2, raw = FALSE) +
                             # slope_scaled +
                             # I(slope_scaled^2) +
                              # veg_herby
-                             herby_scaled +
+                             # herby_scaled +
                              # poly(veg_herby, degree = 1, raw = FALSE) +
                             # elev_log +
                             # I(elev_log^2) +
@@ -242,31 +251,31 @@ glmmTMB_model_month1 <- glmmTMB(y ~ -1 +
                             canopy_scaled +
                             # I(canopy_scaled^2) +
                              # poly(canopy_scaled, degree = 2, raw = FALSE) +
-                            sl +
+                            sl_scaled +
                             log_sl +
                             cos_ta +
-                             (1 | step_id) +
-                           (0 + ndvi_scaled | id) +
+                            (1 | step_id) +
+                            (0 + ndvi_scaled | id) +
                              # (0 + poly(ndvi_scaled, degree = 2, raw = FALSE) | id) +
                            # (0 + slope_scaled | id) +
-                            (0 + herby_scaled | id) +
+                            # (0 + herby_scaled | id) +
                              # (0 + poly(veg_herby, degree = 1, raw = FALSE) | id) +
-                           (0 + canopy_scaled | id) +
+                            (0 + canopy_scaled | id) +
                              # (0 + poly(canopy_scaled, degree = 2, raw = FALSE) | id),
-                             (0 + sl | id) +
+                             (0 + sl_scaled | id) +
                            (0 + log_sl | id) +
                            (0 + cos_ta | id),
                            
-                         data = buffalo_month_subset, 
+                         data = buffalo_data, 
                          family = poisson,
-                         map = list(theta = factor(c(NA, 1:6))),
-                         start = list(theta = c(log(1e3), rep(0,6)))
+                         map = list(theta = factor(c(NA, 1:5))),
+                         start = list(theta = c(log(1e3), rep(0,5)))
                          )
 toc()
 
 beep(sound = 2)
 
-summary(glmmTMB_model_month1)
+summary(glmmTMB_model)
 
 
 #########################
@@ -287,11 +296,11 @@ naive <- rast(resources)[[1]]
 naive <- terra::setValues(naive, 0)
 names(naive) <- "naive_predictions"
 
-ndvi_lin <- glmmTMB_model_month1$fit$par[1]
-ndvi_quad <- glmmTMB_model_month1$fit$par[2]
-herby_lin <- glmmTMB_model_month1$fit$par[3]
-canopy_lin <- glmmTMB_model_month1$fit$par[4]
-canopy_quad <- glmmTMB_model_month1$fit$par[5]
+ndvi_lin <- glmmTMB_model$fit$par[1]
+ndvi_quad <- glmmTMB_model$fit$par[2]
+herby_lin <- glmmTMB_model$fit$par[3]
+canopy_lin <- glmmTMB_model$fit$par[4]
+canopy_quad <- glmmTMB_model$fit$par[5]
 
 x <- seq(-3, 3, 0.1)
 y_ndvi <- x * ndvi_lin + x^2 * ndvi_quad
@@ -517,6 +526,71 @@ glmmTMB_model <- glmmTMB(y ~ -1 +
                              (0 + poly(canopy_scaled, degree = 2, raw = FALSE) | id),
                            
                          data = buffalo_CLR_year, 
+                         family = poisson,
+                         map = list(theta = factor(c(NA, 1:6))),
+                         start = list(theta = c(log(1e3), rep(0,6))) # 
+                         )
+toc()
+
+summary(glmmTMB_model)
+
+```
+
+
+
+```{r}
+
+# month_no <- 7
+# buffalo_month_subset <- buffalo_CLR_year %>% filter(month == month_no)
+
+# sum(is.na(buffalo_CLR_year$water_dist_log))
+
+tic()
+glmmTMB_model <- glmmTMB(y ~ -1 +
+                           # ndvi_scaled +
+                           #  I(ndvi_scaled^2) +
+                            poly(ndvi_scaled, degree = 2, raw = FALSE) +
+                           poly(ndvi_s1, degree = 2, raw = FALSE) +
+                           poly(ndvi_scaled, degree = 2, raw = FALSE) +
+                           poly(ndvi_scaled, degree = 2, raw = FALSE) +
+                           poly(ndvi_scaled, degree = 2, raw = FALSE) +
+                            # slope_scaled +
+                            # I(slope_scaled^2) +
+                             # herby_scaled +
+                             # poly(veg_herby, degree = 1, raw = FALSE) +
+                            # elev_log +
+                            # I(elev_log^2) +
+                             # poly(water_dist, degree = 2, raw = FALSE) +
+                             # poly(water_dist_log, degree = 2, raw = FALSE) +
+                             # water_dist +
+                            # water_dist_log +
+                            # I(water_dist_log^2) +
+                            # canopy_scaled +
+                            # I(canopy_scaled^2) +
+                             poly(canopy_scaled, degree = 2, raw = FALSE) +
+                           poly(canopy_scaled, degree = 2, raw = FALSE):yday_s1 +
+                           poly(canopy_scaled, degree = 2, raw = FALSE):yday_s2 +
+                           poly(canopy_scaled, degree = 2, raw = FALSE):yday_c1 +
+                           poly(canopy_scaled, degree = 2, raw = FALSE):yday_c2 +
+                             
+                             sl +
+                             log_sl +
+                             cos_ta +
+                             
+                            # poly(sl, degree = 1, raw = FALSE) +
+                            # poly(log_sl, degree = 1, raw = FALSE) +
+                            #  poly(cos_ta, degree = 1, raw = FALSE) +
+                             
+                             (1 | step_id) +
+                           # (0 + ndvi_scaled | id) +
+                             (0 + poly(ndvi_scaled, degree = 2, raw = FALSE) | id) +
+                           # (0 + slope_scaled | id) +
+                             # (0 + poly(veg_herby, degree = 1, raw = FALSE) | id) +
+                             # (0 + poly(water_dist, degree = 2, raw = FALSE) | id) +
+                           # (0 + canopy_scaled | id)
+                             (0 + poly(canopy_scaled, degree = 2, raw = FALSE) | id),
+                           
+                         data = buffalo_data, 
                          family = poisson,
                          map = list(theta = factor(c(NA, 1:6))),
                          start = list(theta = c(log(1e3), rep(0,6))) # 

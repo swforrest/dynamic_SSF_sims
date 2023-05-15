@@ -143,66 +143,6 @@ unique(buffalo_CLR_year$id)
 
 ```
 
-
-Aligning step ids
-
-```{r}
-
-# buffalo_stan <- buffalo_all_covs %>% 
-#   filter(id != 2346) %>% 
-#   drop_na(c(ndvi_temporal, ndwi_temporal, veg_herby, canopy_01, sl_)) %>% 
-#   
-#   mutate(id_num = as.numeric(factor(id)), step_id = step_id_, 
-#          x1 = x1_, x2 = x2_, 
-#          y1 = y1_, y2 = y2_, 
-#          t1 = t1_, t1_rounded = round_date(buffalo_stan$t1, "hour"), t2 = t2_, 
-#          sl = sl_, log_sl = log_sl_, 
-#          ta = ta_, cos_ta = cos_ta_)  %>% 
-#   
-#   dplyr::select(!(burst_:case_))
-
-rounded_hours <- unique(round_date(buffalo_CLR_year$t1, "hour"))
-rounded_hours <- rounded_hours[order(rounded_hours)]
-unique_hours <- 1:length(unique(round_date(buffalo_CLR_year$t1, "hour")))
-hourly_steps <- data.frame(unique_hours, rounded_hours)
-
-buffalo_CLR_year$step_aligned <- 0
-for(i in 1:length(unique_hours)) {
-  buffalo_CLR_year$step_aligned[which(buffalo_CLR_year$t1_rounded == hourly_steps$rounded_hours[i])] <- hourly_steps$unique_hours[i]
-}
-
-
-buffalo_CLR_year %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
-  geom_point(alpha = 0.1) +
-  scale_y_discrete("Buffalo ID") +
-  scale_x_datetime("Date") +
-  scale_colour_viridis_d() +
-  theme_bw() +
-  theme(legend.position = "none")
-
-# ggsave("outputs/plots/buffalo_timeline_20221220.png", width=150, height=90, units="mm", dpi = 300)
-
-buffalo_CLR_year %>% ggplot(aes(x = step_id, y = factor(id), colour = factor(id))) +
-  geom_point() +
-  scale_y_discrete("Buffalo ID") +
-  scale_x_continuous("Step ID") +
-  scale_colour_viridis_d() +
-  theme_bw() +
-  theme(legend.position = "none")
-
-buffalo_CLR_year %>% ggplot(aes(x = step_aligned, y = factor(id), colour = factor(id))) +
-  geom_point() +
-  scale_y_discrete("Buffalo ID") +
-  scale_x_continuous("Aligned Step ID") +
-  scale_colour_viridis_d() +
-  theme_bw() +
-  theme(legend.position = "none")
-
-# ggsave("outputs/plots/buffalo_timeline_steps_20221220.png", width=150, height=90, units="mm", dpi = 300)
-
-```
-
-
 Movement parameters from random sampling
 
 ```{r}
@@ -837,6 +777,8 @@ harmonic_coefs %>% filter(id %in% unique(harmonic_coefs$id)[11])
 ```
 
 
+
+
 ```{r}
 
 x <- seq(0, 1000, length = 500)
@@ -876,7 +818,11 @@ scaling_mean <- as.numeric(attributes(buffalo_CLR_year$ndvi_scaled)[1]) # 0.3125
 scaling_sd <- as.numeric(attributes(buffalo_CLR_year$ndvi_scaled)[2]) # 0.143179 for July 2018
 
 ndvi_stack_scaled <- (ndvi_projected - scaling_mean) / scaling_sd
-plot(ndvi_stack_scaled)
+# plot(ndvi_stack_scaled)
+time_vector <- terra::time(ndvi_projected)
+terra::time(ndvi_stack_scaled) <- NULL
+terra::time(ndvi_stack_scaled) <- lubridate::date(as.POSIXlt(as.POSIXlt("1970/01/01 00:00:00") + time_vector))
+
 
 # plot(ndvi_projected[ndvi_projected > 0])
 # 
@@ -1159,6 +1105,7 @@ ecospat.boyce2 <- function (fit, obs, nclass = 0, window.w = "default", res = 10
 
 
 
+
 ```{r}
 
 boyce_naive_list <- vector(mode = "list", length = 12)
@@ -1262,6 +1209,15 @@ for(i in 1:12) {
 for(i in 1:12) print(boyce_naive_list[[i]]$cor)
 
 ```
+
+
+
+
+
+
+
+
+
 
 
 

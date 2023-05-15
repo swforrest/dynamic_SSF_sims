@@ -176,13 +176,16 @@ for(i in 1:length(unique_hours)) {
 #   theme_bw() +
 #   theme(legend.position = "none")
 
-buffalo_CLR_year %>% ggplot(aes(x = step_aligned, y = factor(id), colour = factor(id))) +
-  geom_point() +
-  scale_y_discrete("Buffalo ID") +
-  scale_x_continuous("Aligned Step ID") +
-  scale_colour_viridis_d() +
-  theme_bw() +
-  theme(legend.position = "none")
+
+# run the one below
+
+# buffalo_CLR_year %>% ggplot(aes(x = step_aligned, y = factor(id), colour = factor(id))) +
+#   geom_point() +
+#   scale_y_discrete("Buffalo ID") +
+#   scale_x_continuous("Aligned Step ID") +
+#   scale_colour_viridis_d() +
+#   theme_bw() +
+#   theme(legend.position = "none")
 
 # ggsave("outputs/plots/buffalo_timeline_steps_20221220.png", width=150, height=90, units="mm", dpi = 300)
 

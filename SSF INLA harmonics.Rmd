@@ -1,0 +1,2172 @@
+---
+title: "SSF INLA"
+author: "Scott Forrest"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+This document contains
+
+Getting data prepared for INLA 
+- aligning the step ids,
+- creating additional variables for ids
+
+Running an INLA model with:
+- covariates = ndvi_temporal, slope, canopy_01_scaled and herby_scaled
+- with 2 harmonics
+
+
+```{r message = FALSE}
+# devtools::install_github("jmsigner/amt")
+# install.packages("amt")
+
+# install.packages("mapedit")
+# install.packages("brms")
+
+library(tidyverse)
+
+packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", "RColorBrewer", "patchwork", "ecospat", "ggmap", "basemaps", "mapedit", "sf", "brms", "rstan", "gganimate", "splines", "INLA")
+walk(packages, require, character.only = T)
+
+```
+
+
+Import buffalo telemetry data.
+
+```{r message = FALSE}
+
+buffalo_inla <- buffalo_CLR_year %>% 
+  mutate(id1 = as.numeric(as.factor(id)),
+         id2 = id1,
+         id3 = id1,
+         id4 = id1,
+         id5 = id1,
+         id6 = id1,
+         id7 = id1,
+         id8 = id1)
+
+```
+
+
+```{r}
+
+cor(buffalo_model[,2:18])
+
+```
+
+
+Importing layers to predict over
+
+```{r}
+
+year <- rep(2019, 12) # the year is arbitrary, it's just to make a date for the ndvi rasters so they can be called
+month <- seq(1,12,1)
+day <- rep(1, 12)
+dates <- make_datetime(year = year, month = month, day = day, tz = "Australia/Queensland")
+
+ndvi_monthly_mean <- rast("mapping/cropped rasters/ndvi_GEE_monthly_mean_20221220.tif")
+
+time(ndvi_monthly_mean) <- dates
+plot(ndvi_monthly_mean[[1]])
+
+water <- ndvi_monthly_mean[[10]] < - 0.1
+plot(water)
+ndvi_monthly_mean <- terra::mask(ndvi_monthly_mean, water, maskvalue = 1)
+# plot(ndvi_projected)
+
+# ndwi_stack_projected <- rast("mapping/cropped rasters/ndwi_terra_25m_20221125.tif")
+# ndwi_stack_projected <- raster::mask(ndwi_stack_projected, water, maskvalue = 1)
+# plot(ndwi_stack_projected)
+
+DEM_H <- rast("mapping/cropped rasters/DEM_H_raster.tif")
+elev_values <- data.frame(terra::values(DEM_H))
+
+water_dist <- rast("mapping/cropped rasters/water_dist_stack_20230207.tif")
+water_dist_times <- terra::time(water_dist)
+names(water_dist) <- paste("water_dist_", water_dist_times, sep = "")
+water_dist_values_june2018 <- data.frame(terra::values(water_dist[[6]]))
+
+slope <- rast("mapping/cropped rasters/slope_raster.tif")
+WOFS <- rast("mapping/cropped rasters/WOFS.tif")
+WOFS05_dist <- rast("mapping/cropped rasters/wofs_05_dist.tif")
+WOFS10_dist <- rast("mapping/cropped rasters/wofs_10_dist.tif")
+WOFS15_dist <- rast("mapping/cropped rasters/wofs_15_dist.tif")
+WOFS20_dist <- rast("mapping/cropped rasters/wofs_20_dist.tif")
+WOFS25_dist <- rast("mapping/cropped rasters/WOFS25_dist.tif")
+WOFS50_dist <- rast("mapping/cropped rasters/WOFS50_dist.tif")
+WOFS80_dist <- rast("mapping/cropped rasters/WOFS80_dist.tif")
+veg_woody <- rast("mapping/cropped rasters/veg_woody.tif")
+veg_herby <- rast("mapping/cropped rasters/veg_herby.tif")
+canopy_cover <- rast("mapping/cropped rasters/canopy_cover.tif")
+canopy_01 <- canopy_cover/100
+
+names(DEM_H) <- "DEM_H"
+names(slope) <- "slope"
+names(WOFS) <- "WOFS"
+names(WOFS05_dist) <- "WOFS05_dist"
+names(WOFS10_dist) <- "WOFS10_dist"
+names(WOFS15_dist) <- "WOFS15_dist"
+names(WOFS20_dist) <- "WOFS20_dist"
+names(WOFS25_dist) <- "WOFS25_dist"
+names(WOFS50_dist) <- "WOFS50_dist"
+names(WOFS80_dist) <- "WOFS80_dist"
+names(veg_woody) <- "veg_woody"
+names(veg_herby) <- "veg_herby"
+# names(canopy_cover) <- "canopy_cover"
+names(canopy_01) <- "canopy_cover"
+
+plot(DEM_H)
+plot(slope)
+plot(WOFS)
+plot(WOFS05_dist)
+plot(WOFS10_dist)
+plot(WOFS15_dist)
+plot(WOFS20_dist)
+plot(WOFS25_dist)
+plot(WOFS50_dist)
+plot(WOFS80_dist)
+plot(veg_woody)
+plot(veg_herby)
+plot(canopy_cover)
+plot(canopy_01)
+
+```
+
+
+Checking the sampled 'available' distributions and what was used, vs what was available in the landscape that we want to predict over
+
+```{r}
+
+buffalo_model %>% ggplot() +
+  geom_density(data = . %>% filter(y == 1), aes(x = DEM_H_end), colour = "orange", alpha = 0.5) +
+  geom_density(data = . %>% filter(y == 0), aes(x = DEM_H_end), colour = "skyblue", alpha = 0.5) +
+  geom_density(data = elev_values, aes(x = DEM_H_raster), colour = "red") +
+  theme_classic()
+
+buffalo_model %>% ggplot() +
+  geom_density(data = . %>% filter(y == 1), aes(x = elev_log), fill = "orange", alpha = 0.5) +
+  geom_density(data = . %>% filter(y == 0), aes(x = elev_log), fill = "skyblue", alpha = 0.5) +
+  geom_density(data = elev_values, aes(x = log(DEM_H_raster)), colour = "red") +
+  theme_classic()
+
+buffalo_model %>% ggplot() +
+  geom_density(data = . %>% filter(y == 1), aes(x = water_dist), fill = "orange", alpha = 0.5) +
+  geom_density(data = . %>% filter(y == 0), aes(x = water_dist), fill = "skyblue", alpha = 0.5) +
+  geom_density(data = water_dist_values_june2018, aes(x = water_dist_2018.06.01), colour = "red") +
+  theme_classic()
+
+buffalo_model %>% ggplot() +
+  geom_density(data = . %>% filter(y == 1), aes(x = water_dist_log), fill = "orange", alpha = 0.5) +
+  geom_density(data = . %>% filter(y == 0), aes(x = water_dist_log), fill = "skyblue", alpha = 0.5) +
+  geom_density(data = water_dist_values_june2018, aes(x = log(water_dist_2018.06.01)), colour = "red") +
+  theme_classic()
+
+```
+
+
+
+
+Running monthly INLA models in a loop
+
+```{r}
+
+# priors
+
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+prec.beta.wofs05 <- 1e-4
+prec.beta.wofs80 <- 1e-4
+prec.beta.elev <- 1e-4
+prec.beta.slope <- 1e-4
+prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+
+
+# formula
+
+formula.random <- y ~ -1 + 
+  
+  ndvi_temporal +
+  WOFS05_dist_scaled +
+  WOFS80_dist_scaled +
+  elev_scaled +
+  slope_scaled +
+  veg_herby +
+  canopy_01 +
+  sl +
+  # sl_scaled  +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  f(id_refactor1, ndvi_temporal, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id_refactor4, elev_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id_refactor5, slope_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id_refactor6, veg_herby, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id_refactor7, canopy_01, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+
+# setting up loop
+
+inla_monthly_models_full <- vector(mode = "list", length = 12)
+coefs_full <- data.frame("coef" = c("ndvi_temporal", "WOFS05_dist", "WOFS80_dist", "elev", 
+                               "slope", "veg_herby", "canopy_01", "sl_scaled"))
+
+# fitting models
+
+for(i in 1:12) {
+
+buffalo_subset <- buffalo_model %>% filter(month == i)
+id_length <- length(unique(buffalo_subset$id_num))
+
+buffalo_subset <- buffalo_subset %>% mutate(id_refactor1 = as.numeric(as.factor(id_num)), id_refactor2 = id_refactor1, id_refactor3 = id_refactor1, id_refactor4 = id_refactor1, id_refactor5 = id_refactor1, id_refactor6 = id_refactor1, id_refactor7 = id_refactor1) 
+# id_length <- length(unique(buffalo_subset$id_refactor))
+
+tic()
+m_all <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_subset,
+              # verbose = T,
+              control.compute = list(dic = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_temporal = prec.beta.ndvi,
+                            WOFS05_dist_scaled = prec.beta.wofs05,
+                            WOFS80_dist_scaled = prec.beta.wofs80,
+                            elev_scaled = prec.beta.elev,
+                            slope_scaled = prec.beta.slope,
+                            herby_scaled = prec.beta.herby,
+                            canopy_01 = prec.beta.canopy)
+                )
+              )
+toc()
+
+inla_monthly_models_full[[i]] <- m_all
+# model_name <- paste("model", i, sep = "_")
+coefs_full <- cbind(coefs_full, m_all$summary.fixed$mean) # beta estimates (mean of posterior)
+
+}
+
+colnames(coefs_full) <- c("coef", 1:12) #paste0("model_", 1:12))
+
+coefs_full
+# write_csv(coefs_full, "outputs/piecewise_monthly_coefs_full-model_20221220.csv")
+
+coefs_long <- coefs_full %>% pivot_longer(cols = !coef, names_to = "month") %>% mutate(month = as.numeric(month)) # %>% filter(coef != "sl_scaled") #%>% dplyr::arrange(model)
+
+coefs_long %>% ggplot(aes(x = month, y = value, colour = coef)) +
+  geom_path(size = 0.5) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  scale_colour_viridis_d("Coefficient") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_bw()
+
+temp_coefs <- coefs_long %>% pivot_wider(names_from = coef, values_from = value)
+
+summary(inla_monthly_models_full[[1]])
+
+dic_full <- c()
+for(i in 1:12) dic_full[i] <- inla_monthly_models_full[[i]]$dic[[1]]
+dic_full
+mean(dic_full)
+
+```
+
+
+
+### Generating predictions
+
+```{r temporal naive}
+
+# sanity check to ensure that the coefficients line up to the correct months
+coefs_long %>% ggplot(aes(x = month, y = value, colour = factor(coef))) +
+  geom_line() +
+  geom_point() +
+  scale_colour_viridis_d("Covariate") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  theme_bw()
+
+```
+
+
+### Scaling environmental variables
+
+
+```{r}
+
+wofs05_scaled <- (WOFS05_dist - attributes(buffalo_model$WOFS05_dist_scaled)$`scaled:center`) / attributes(buffalo_model$WOFS05_dist_scaled)$`scaled:scale`
+plot(wofs05_scaled)
+
+wofs80_scaled <- (WOFS80_dist - attributes(buffalo_model$WOFS80_dist_scaled)$`scaled:center`) / attributes(buffalo_model$WOFS80_dist_scaled)$`scaled:scale`
+plot(wofs80_scaled)
+
+elev_scaled <- (DEM_H - attributes(buffalo_model$elev_scaled)$`scaled:center`) / attributes(buffalo_model$elev_scaled)$`scaled:scale`
+plot(elev_scaled)
+
+slope_scaled <- (slope - attributes(buffalo_model$slope_scaled)$`scaled:center`) / attributes(buffalo_model$slope_scaled)$`scaled:scale`
+plot(slope_scaled)
+
+herby_scaled <- (veg_herby - attributes(buffalo_model$herby_scaled)$`scaled:center`) / attributes(buffalo_model$herby_scaled)$`scaled:scale`
+plot(herby_scaled)
+
+canopy_scaled <- (canopy_01 - attributes(buffalo_model$canopy_scaled)$`scaled:center`) / attributes(buffalo_model$canopy_scaled)$`scaled:scale`
+plot(canopy_scaled)
+
+```
+
+
+
+
+```{r}
+
+# layers < c()
+layers_naive <- c()
+
+for(i in 1:12) {
+
+    # generating stack for the particular month
+resources <- c(ndvi_monthly_mean[[which(month(time(ndvi_monthly_mean)) == temp_coefs$month[i])]],
+               # ndwi_stack_projected[[which(time(ndwi_stack_projected) == temp_coefs$date[i])]],
+               wofs05_scaled,
+               wofs80_scaled,
+               elev_scaled,
+               slope_scaled,
+               herby_scaled,
+               canopy_scaled)
+
+# plot(resources)
+
+
+naive <- rast(resources)[[1]]
+naive <- terra::setValues(naive, 0)
+  
+for (j in 1:7) {
+  naive <- sum(naive, temp_coefs[i,][[j + 1]] * resources[[j]])
+}
+
+naive_norm <- exp(naive)/global(exp(naive), fun = "sum", na.rm = TRUE)[[1]]
+# plot(naive_norm)
+layers_naive <- c(layers_naive, naive_norm)
+
+}
+
+# plot(naive_norm)
+layer_naive_stack <- rast(layers_naive)
+
+layer_naive_stack[[i]]
+
+# plot(water)
+# layer_naive_stack <- terra::mask(layer_naive_stack, water, maskvalue = 1)
+time(layer_naive_stack) <- dates
+names(layer_naive_stack) <- as.character(dates)
+
+# plot(layer_naive_stack) #, col = brewer.pal(9, "Reds"), main = time
+
+for(i in 1:12) (plot(layer_naive_stack[[i]], main = time(layer_naive_stack[[i]])))
+
+```
+
+
+
+```{r}
+
+# writing rasters - separately for loading into QGIS
+for(i in 1:12) {
+  terra::writeRaster(layer_naive_stack[[i]],
+                     filename = paste("mapping/pred_outputs/naive/naive_full_scaled", 
+                                      names(layer_naive_stack[[i]]), "20221220.tif", 
+                                      sep = "_"))}
+
+```
+
+
+
+```{r temporal pde}
+
+layers_pde <- c()
+
+for(i in 1:12) {
+
+resources <- c(ndvi_monthly_mean[[which(month(time(ndvi_monthly_mean)) == temp_coefs$month[i])]],
+               # ndwi_stack_projected[[which(time(ndwi_stack_projected) == temp_coefs$date[i])]],
+               wofs05_scaled,
+               wofs80_scaled,
+               elev_scaled,
+               slope_scaled,
+               herby_scaled,
+               canopy_scaled)
+
+pde <- rast(resources)[[1]]
+pde <- terra::setValues(naive, 0)
+  
+for (j in 1:7) {
+  pde <- sum(pde, 2 * temp_coefs[i,][[j + 1]] * resources[[j]])
+}
+
+pde_norm <- exp(pde)/global(exp(pde), fun = "sum", na.rm = TRUE)[[1]]
+layers_pde <- c(layers_pde, pde_norm)
+
+}
+
+layer_pde_stack <- rast(layers_pde)
+
+# layer_pde_stack <- terra::mask(layer_pde_stack, water, maskvalue = 1)
+time(layer_pde_stack) <- dates
+names(layer_pde_stack) <- as.character(dates)
+
+plot(layer_pde_stack) #, col = brewer.pal(9, "Reds"), main = time
+
+for(i in 1:12) (plot(layer_pde_stack[[i]], main = names(layer_pde_stack[[i]])))
+
+# writing rasters - separately for loading into QGIS
+for(i in 1:12) {
+  terra::writeRaster(layer_pde_stack[[i]],
+                     filename = paste("mapping/pred_outputs/pde/pde_full_scaled", 
+                                      names(layer_pde_stack[[i]]), "20221220.tif", 
+                                      sep = "_"),
+                     overwrite = TRUE)}
+
+```
+
+
+
+```{r}
+
+ecospat.boyce2 <- function (fit, obs, nclass = 0, window.w = "default", res = 100, 
+  PEplot = TRUE, rm.duplicate = TRUE, method = "spearman") 
+{
+  boycei <- function(interval, obs, fit) {
+    pi <- sum(as.numeric(obs >= interval[1] & obs <= interval[2]))/length(obs)
+    ei <- sum(as.numeric(fit >= interval[1] & fit <= interval[2]))/length(fit)
+    return(round(pi/ei, 10))
+  }
+  if (inherits(fit, "RasterLayer")) {
+    if (is.data.frame(obs) || is.matrix(obs)) {
+      obs <- raster::extract(fit, obs)
+    }
+    fit <- getValues(fit)
+    fit <- fit[!is.na(fit)]
+    obs <- obs[!is.na(obs)]
+  }
+  mini <- min(fit, obs)
+  maxi <- max(fit, obs)
+  if (length(nclass) == 1) {
+    if (nclass == 0) {
+      if (window.w == "default") {
+        window.w <- (max(fit) - min(fit))/10
+      }
+      vec.mov <- seq(from = mini, to = maxi - window.w, 
+        by = (maxi - mini - window.w)/res)
+      vec.mov[res + 1] <- vec.mov[res + 1] + 1
+      interval <- cbind(vec.mov, vec.mov + window.w)
+    }
+    else {
+      vec.mov <- seq(from = mini, to = maxi, by = (maxi - 
+        mini)/nclass)
+      interval <- cbind(vec.mov, c(vec.mov[-1], maxi))
+    }
+  }
+  else {
+    vec.mov <- c(mini, sort(nclass[!nclass > maxi | nclass < 
+      mini]))
+    interval <- cbind(vec.mov, c(vec.mov[-1], maxi))
+  }
+  f <- apply(interval, 1, boycei, obs, fit)
+  to.keep <- which(f != "NaN")
+  f <- f[to.keep]
+  if (length(f) < 2) {
+    b <- NA
+  }
+  else {
+    r <- 1:length(f)
+    if (rm.duplicate == TRUE) {
+      r <- c(1:length(f))[f != c(f[-1], TRUE)]
+    }
+    b <- cor(f[r], vec.mov[to.keep][r], method = method)
+  }
+  HS <- apply(interval, 1, sum)/2
+  if (length(nclass) == 1 & nclass == 0) {
+    HS[length(HS)] <- HS[length(HS)] - 1
+  }
+  HS <- HS[to.keep]
+  if (PEplot == TRUE) {
+    plot(HS, f, xlab = "Habitat suitability", ylab = "Predicted/Expected ratio", 
+      col = "grey", cex = 0.75)
+    points(HS[r], f[r], pch = 19, cex = 0.75)
+  }
+  return(list(F.ratio = f, cor = round(b, 3), HS = HS))
+}
+
+```
+
+
+
+
+
+```{r}
+
+#extract <- raster::extract
+#extract(naive_norm, df)
+
+# buffalo_all_covs <- buffalo_stan
+# unique(buffalo_stan$id)
+
+# df_nest <- buffalo_all_covs %>% filter(id != 2158 & y == 1) %>% .[,c(1,3,5)] %>% transmute(id = id, x = x1_, y = y1_) %>% group_by(id) %>% nest()
+
+# df_nest <- buffalo_all_covs %>% filter(id != 2158 & y == 1 & month == 7) %>% .[,c(1,3,5)] %>% transmute(id = id, x = x1_, y = y1_) %>% group_by(id) %>% nest()
+
+df_nest <- buffalo_model %>% filter(id != 2158 & y == 1) %>% transmute(x = x1, y = y1, month = month) %>% group_by(month) %>% nest()
+
+# buffalo_all_covs %>% filter(id != 2158 & y == 1 & month == 1)
+
+# df_nest <- df_nest[df_nest$month[c(8, 9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7)],]
+df_nest <- df_nest[df_nest$month[seq(1,12,1)],]
+df_nest$data[[1]]
+
+# boyce_naive_2158_all_nest <- map(df_nest$data, ecospat.boyce, naive_norm)
+
+layer_naive_stack_raster <- raster::stack(layer_naive_stack)
+# plot(layer_naive_stack_raster)
+
+boyce_naive <- vector(mode = "list", length = 12)
+    
+# may need raster format here - convert to raster then should work - also needs to be raster::extract
+#to make this work I took the souce code for the ecospat.boyce function 
+#and added raster::extract and obs <- obs[!is.na(obs)], which worked
+
+for(i in 1:12){
+boyce_naive[[i]] <- ecospat.boyce2(layer_naive_stack_raster[[i]], df_nest$data[[i]])
+}
+
+boyce_naive_df <- bind_rows(boyce_naive)
+# months <- rep(c(8:12, 1:7), each = 100)
+months <- rep(seq(1,12,1), each = 100)
+boyce_naive_df <- cbind(months, boyce_naive_df)
+
+mean(boyce_naive_df$cor)
+unique(boyce_naive_df$cor)
+
+```
+
+
+
+```{r}
+
+# boyce_pde_2158_all_nest <- map(df_nest$data, ecospat.boyce, pde_norm)
+
+boyce_naive_df %>% ggplot(aes(x = HS, y = F.ratio, colour = factor(months))) +
+  geom_point(colour = "black", alpha = 0.5) +
+  geom_path(colour = "black", alpha = 0.5, group = factor(months)) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+# ggsave("outputs/plots/naive_id2158_boyce_20221018.png", width=150, height=150, units="mm", dpi = 300)
+
+```
+
+
+
+```{r}
+
+layer_pde_stack_raster <- raster::stack(layer_pde_stack)
+
+boyce_pde <- vector(mode = "list", length = length(unique(buffalo_model$month)))
+
+for(i in 1:12){
+boyce_pde[[i]] <- ecospat.boyce2(layer_pde_stack_raster[[i]], df_nest$data[[i]])
+}
+
+boyce_pde_df <- bind_rows(boyce_pde)
+mean(boyce_pde_df$cor)
+unique(boyce_pde_df$cor)
+
+boyce_pde_df <- cbind(months, boyce_pde_df)
+
+# need to divide by max HS FOR EACH GROUP
+boyce_naive_df <- boyce_naive_df %>% dplyr::group_by(months) %>% mutate(HS_scaled = HS / max(HS))
+boyce_pde_df <- boyce_pde_df %>% dplyr::group_by(months) %>% mutate(HS_scaled = HS / max(HS))
+
+boyce_naive_mean <- boyce_naive_df %>% dplyr::ungroup() %>% 
+  mutate(HS_rounded = round(HS_scaled, digits = 2)) %>% 
+  dplyr::group_by(HS_rounded) %>% mutate(FR_mean = mean(F.ratio), 
+                                         FR_sd = sd(F.ratio), 
+                                         upper = FR_mean + 1.96 * FR_sd, 
+                                         lower = FR_mean - 1.96 * FR_sd) %>% 
+  dplyr::ungroup()
+
+boyce_pde_mean <- boyce_pde_df %>% dplyr::ungroup() %>% 
+  mutate(HS_rounded = round(HS_scaled, digits = 2)) %>% 
+  dplyr::group_by(HS_rounded) %>% mutate(FR_mean = mean(F.ratio), 
+                                         FR_sd = sd(F.ratio), 
+                                         upper = FR_mean + 1.96 * FR_sd, 
+                                         lower = FR_mean - 1.96 * FR_sd) %>% 
+  dplyr::ungroup()
+
+
+boyce_pde_df %>% ggplot(aes(x = HS, y = F.ratio, colour = factor(months))) +
+  geom_point(colour = "black", alpha = 0.5) +
+  geom_path(colour = "black", alpha = 0.5, group = factor(months)) +
+  theme_bw() +
+  theme(legend.position = "none")
+
+# ggsave("outputs/plots/pde_id2158_boyce_20221018.png", width=150, height=150, units="mm", dpi = 300)
+
+# save.image(file = "workspace images/all_20221012.RData")
+# load(file = "workspace images/all_20221012.RData")
+
+ggplot() +
+  geom_point(data = boyce_naive_df, 
+             aes(x = HS_scaled, y = F.ratio, 
+                 colour = factor(months)), colour = "skyblue", alpha = 0.25) +
+  geom_path(data = boyce_naive_df, 
+            aes(x = HS_scaled, y = F.ratio, colour = factor(months)), 
+            colour = "skyblue", alpha = 0.25, group = factor(months)) +
+  geom_path(data = boyce_pde_df, 
+            aes(x = HS_scaled, y = F.ratio, colour = factor(months)), 
+            colour = "orange", alpha = 0.25, group = factor(months)) +
+  geom_point(data = boyce_pde_df, 
+             aes(x = HS_scaled, y = F.ratio, colour = factor(months)), 
+             colour = "orange", alpha = 0.25) +
+  
+  geom_point(data = boyce_naive_mean, 
+             aes(x = HS_rounded, y = FR_mean, colour = factor(months)), 
+             colour = "skyblue", alpha = 1) +
+  geom_point(data = boyce_pde_mean, 
+             aes(x = HS_rounded, y = FR_mean, colour = factor(months)), 
+             colour = "orange", alpha = 1) +
+  
+  scale_y_continuous("Predicted to expected ratio (P/E)") +
+  scale_x_continuous("Habitat suitability") +
+  theme_bw() +
+  theme(legend.position = "right")
+
+
+
+ggplot() +
+  # geom_point(data = boyce_naive_df, 
+  #            aes(x = HS_scaled, y = F.ratio, 
+  #                colour = factor(months)), colour = "skyblue", alpha = 0.25) +
+  # geom_path(data = boyce_naive_df, 
+  #           aes(x = HS_scaled, y = F.ratio, colour = factor(months)), 
+  #           colour = "skyblue", alpha = 0.25, group = factor(months)) +
+  # geom_path(data = boyce_pde_df, 
+  #           aes(x = HS_scaled, y = F.ratio, colour = factor(months)), 
+  #           colour = "orange", alpha = 0.25, group = factor(months)) +
+  # geom_point(data = boyce_pde_df, 
+  #            aes(x = HS_scaled, y = F.ratio, colour = factor(months)), 
+  #            colour = "orange", alpha = 0.25) +
+
+  # geom_ribbon(data = boyce_naive_mean, 
+               # aes(x = HS_scaled, ymin = lower, ymax = upper, fill = covs), 
+               # fill = "skyblue", alpha = 0.25) +
+  geom_point(data = boyce_naive_mean, 
+             aes(x = HS_rounded, y = FR_mean), 
+             colour = "skyblue", alpha = 0.5) +
+  geom_smooth(data = boyce_naive_mean, 
+             aes(x = HS_rounded, y = FR_mean), 
+             colour = "skyblue", alpha = 0.5, se = F, method = "gam") +
+  # geom_path(data = boyce_naive_mean,
+  #            aes(x = HS_rounded, y = FR_mean, group = factor(months)),
+  #            colour = "skyblue", alpha = 0.5) +
+  geom_point(data = boyce_pde_mean, 
+             aes(x = HS_rounded, y = FR_mean), 
+             colour = "orange", alpha = 0.5) +
+  geom_smooth(data = boyce_pde_mean, 
+             aes(x = HS_rounded, y = FR_mean), 
+             colour = "orange", alpha = 0.5, se = F, method = "gam") +
+  # geom_path(data = boyce_pde_mean,
+  #            aes(x = HS_rounded, y = FR_mean, group = factor(months)),
+  #            colour = "orange", alpha = 0.5) +
+  
+  scale_y_continuous("Predicted to expected ratio (P/E)") +
+  scale_x_continuous("Habitat suitability") +
+  theme_bw() +
+  theme(legend.position = "right")
+
+# ggsave("outputs/plots/boyce_both_smooth_20221209.png", width=250, height=150, units="mm", dpi = 300)
+
+
+boyce_naive_df %>% dplyr::ungroup() %>%  summarise(mean = mean(cor), sd = sd(cor))
+boyce_pde_df %>% dplyr::ungroup() %>%  summarise(mean = mean(cor), sd = sd(cor))
+
+# save.image(file = "workspace images/INLA_with_predictions_smooth_202211209.RData")
+
+```
+
+
+
+
+
+```{r}
+
+save.image(file = "workspace images/workspace_image_inla_model_selection_20221220.RData")
+# load(file = "workspace images/workspace_image_inla_model_selection_20221220.RData")
+
+```
+
+
+
+Full minus one
+
+```{r}
+
+# priors
+
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+prec.beta.wofs05 <- 1e-4
+prec.beta.wofs80 <- 1e-4
+prec.beta.elev <- 1e-4
+prec.beta.slope <- 1e-4
+prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+
+
+# formula
+
+formula.random <- y ~ -1 + 
+  
+  ndvi_temporal +
+  WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  elev_scaled +
+  slope_scaled +
+  veg_herby +
+  canopy_01 +
+  sl_scaled  +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  f(id_refactor1, ndvi_temporal, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  # f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id_refactor4, elev_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id_refactor5, slope_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id_refactor6, veg_herby, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id_refactor7, canopy_01, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+
+# setting up loop
+
+inla_monthly_models_no_wofs80 <- vector(mode = "list", length = 12)
+coefs_no_wofs80 <- data.frame("coef" = c("ndvi_temporal", "WOFS05_dist", "elev", 
+                               "slope", "veg_herby", "canopy_01", "sl_scaled")) # "WOFS80_dist", 
+
+# fitting models
+
+for(i in 1:12) {
+
+buffalo_subset <- buffalo_model %>% filter(month == i)
+id_length <- length(unique(buffalo_subset$id_num))
+
+buffalo_subset <- buffalo_subset %>% mutate(id_refactor1 = as.numeric(as.factor(id_num)), id_refactor2 = id_refactor1, id_refactor3 = id_refactor1, id_refactor4 = id_refactor1, id_refactor5 = id_refactor1, id_refactor6 = id_refactor1, id_refactor7 = id_refactor1) 
+# id_length <- length(unique(buffalo_subset$id_refactor))
+
+tic()
+m_all <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_subset,
+              # verbose = T,
+              control.compute = list(dic = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_temporal = prec.beta.ndvi,
+                            WOFS05_dist_scaled = prec.beta.wofs05,
+                            # WOFS80_dist_scaled = prec.beta.wofs80,
+                            elev_scaled = prec.beta.elev,
+                            slope_scaled = prec.beta.slope,
+                            herby_scaled = prec.beta.herby,
+                            canopy_01 = prec.beta.canopy)
+                )
+              )
+toc()
+
+inla_monthly_models_no_wofs80[[i]] <- m_all
+# model_name <- paste("model", i, sep = "_")
+coefs_no_wofs80 <- cbind(coefs_no_wofs80, m_all$summary.fixed$mean) # beta estimates (mean of posterior)
+
+}
+
+colnames(coefs_no_wofs80) <- c("coef", 1:12) #paste0("model_", 1:12))
+
+coefs_no_wofs80
+
+coefs_long <- coefs_no_wofs80 %>% pivot_longer(cols = !coef, names_to = "model") # %>% filter(coef != "sl_scaled") #%>% dplyr::arrange(model)
+
+coefs_long %>% ggplot(aes(x = as.numeric(model), y = value, colour = coef)) +
+  geom_path(size = 0.5) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  scale_colour_viridis_d("Coefficient") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_bw()
+
+
+summary(inla_monthly_models_no_wofs80[[1]])
+
+dic_no_wofs80 <- c()
+for(i in 1:12) dic_no_wofs80[i] <- inla_monthly_models_no_wofs80[[i]]$dic[[1]]
+dic_no_wofs80
+mean(dic_no_wofs80)
+
+```
+
+
+
+
+```{r}
+
+# priors
+
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+prec.beta.wofs05 <- 1e-4
+prec.beta.wofs80 <- 1e-4
+prec.beta.elev <- 1e-4
+prec.beta.slope <- 1e-4
+prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+
+
+# formula
+
+formula.random <- y ~ -1 + 
+  
+  ndvi_temporal +
+  # WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  # elev_scaled +
+  # slope_scaled +
+  veg_herby +
+  canopy_01 +
+  sl_scaled  +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  f(id_refactor1, ndvi_temporal, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  # f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor4, elev_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor5, slope_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id_refactor6, veg_herby, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id_refactor7, canopy_01, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+
+# setting up loop
+
+inla_monthly_models_sub1 <- vector(mode = "list", length = 12)
+coefs_sub1 <- data.frame("coef" = c("ndvi_temporal", "veg_herby", "canopy_01", "sl_scaled"))
+
+# fitting models
+
+for(i in 1:12) {
+
+buffalo_subset <- buffalo_model %>% filter(month == i)
+id_length <- length(unique(buffalo_subset$id_num))
+
+buffalo_subset <- buffalo_subset %>% mutate(id_refactor1 = as.numeric(as.factor(id_num)), id_refactor2 = id_refactor1, id_refactor3 = id_refactor1, id_refactor4 = id_refactor1, id_refactor5 = id_refactor1, id_refactor6 = id_refactor1, id_refactor7 = id_refactor1) 
+# id_length <- length(unique(buffalo_subset$id_refactor))
+
+tic()
+m_all <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_subset,
+              # verbose = T,
+              control.compute = list(dic = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_temporal = prec.beta.ndvi,
+                            WOFS05_dist_scaled = prec.beta.wofs05,
+                            WOFS80_dist_scaled = prec.beta.wofs80,
+                            elev_scaled = prec.beta.elev,
+                            slope_scaled = prec.beta.slope,
+                            herby_scaled = prec.beta.herby,
+                            canopy_01 = prec.beta.canopy)
+                )
+              )
+toc()
+
+inla_monthly_models_sub1[[i]] <- m_all
+# model_name <- paste("model", i, sep = "_")
+coefs_sub1 <- cbind(coefs_sub1, m_all$summary.fixed$mean) # beta estimates (mean of posterior)
+
+}
+
+colnames(coefs_sub1) <- c("coef", 1:12) #paste0("model_", 1:12))
+
+coefs_sub1
+
+coefs_long <- coefs_sub1 %>% pivot_longer(cols = !coef, names_to = "model") # %>% filter(coef != "sl_scaled") #%>% dplyr::arrange(model)
+
+coefs_long %>% ggplot(aes(x = as.numeric(model), y = value, colour = coef)) +
+  geom_path(size = 0.5) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  scale_colour_viridis_d("Coefficient") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_bw()
+
+
+# summary(inla_monthly_models_full[[1]])
+
+dic_sub1 <- c()
+for(i in 1:12) dic_sub1[i] <- inla_monthly_models_sub1[[i]]$dic[[1]]
+dic_sub1
+mean(dic_sub1)
+
+```
+
+
+
+```{r}
+
+# priors
+
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+prec.beta.wofs05 <- 1e-4
+prec.beta.wofs80 <- 1e-4
+prec.beta.elev <- 1e-4
+prec.beta.slope <- 1e-4
+prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+
+
+# formula
+
+formula.random <- y ~ -1 + 
+  
+  ndvi_temporal +
+  # WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  # elev_scaled +
+  # slope_scaled +
+  # veg_herby +
+  # canopy_01 +
+  sl_scaled  +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  f(id_refactor1, ndvi_temporal, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) 
+  
+  # f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor4, elev_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor5, slope_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  # f(id_refactor6, veg_herby, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  # f(id_refactor7, canopy_01, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+
+# setting up loop
+
+inla_monthly_models_base <- vector(mode = "list", length = 12)
+coefs_base <- data.frame("coef" = c("ndvi_temporal", "veg_herby", "canopy_01", "sl_scaled"))
+
+# fitting models
+
+for(i in 1:12) {
+
+buffalo_subset <- buffalo_model %>% filter(month == i)
+id_length <- length(unique(buffalo_subset$id_num))
+
+buffalo_subset <- buffalo_subset %>% mutate(id_refactor1 = as.numeric(as.factor(id_num)), id_refactor2 = id_refactor1, id_refactor3 = id_refactor1, id_refactor4 = id_refactor1, id_refactor5 = id_refactor1, id_refactor6 = id_refactor1, id_refactor7 = id_refactor1) 
+# id_length <- length(unique(buffalo_subset$id_refactor))
+
+tic()
+m_all <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_subset,
+              # verbose = T,
+              control.compute = list(dic = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_temporal = prec.beta.ndvi,
+                            WOFS05_dist_scaled = prec.beta.wofs05,
+                            WOFS80_dist_scaled = prec.beta.wofs80,
+                            elev_scaled = prec.beta.elev,
+                            slope_scaled = prec.beta.slope,
+                            herby_scaled = prec.beta.herby,
+                            canopy_01 = prec.beta.canopy)
+                )
+              )
+toc()
+
+inla_monthly_models_base[[i]] <- m_all
+# model_name <- paste("model", i, sep = "_")
+coefs_base <- cbind(coefs_base, m_all$summary.fixed$mean) # beta estimates (mean of posterior)
+
+}
+
+colnames(coefs_base) <- c("coef", 1:12) #paste0("model_", 1:12))
+
+coefs_base
+
+coefs_long <- coefs_base %>% pivot_longer(cols = !coef, names_to = "model") # %>% filter(coef != "sl_scaled") #%>% dplyr::arrange(model)
+
+coefs_long %>% ggplot(aes(x = as.numeric(model), y = value, colour = coef)) +
+  geom_path(size = 0.5) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  scale_colour_viridis_d("Coefficient") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_bw()
+
+
+# summary(inla_monthly_models_full[[1]])
+
+dic_ndvi <- c()
+for(i in 1:12) dic_ndvi[i] <- inla_monthly_models_base[[i]]$dic[[1]]
+dic_ndvi
+mean(dic_ndvi)
+
+```
+
+
+```{r}
+
+# priors
+
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+prec.beta.wofs05 <- 1e-4
+prec.beta.wofs80 <- 1e-4
+prec.beta.elev <- 1e-4
+prec.beta.slope <- 1e-4
+prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+
+
+# formula
+
+formula.random <- y ~ -1 + 
+  
+  # ndvi_temporal +
+  WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  # elev_scaled +
+  # slope_scaled +
+  # veg_herby +
+  # canopy_01 +
+  sl_scaled  +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  # f(id_refactor1, ndvi_temporal, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) 
+  # 
+  # f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor4, elev_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor5, slope_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  # f(id_refactor6, veg_herby, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor7, canopy_01, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+
+# setting up loop
+
+inla_monthly_models_wofs05 <- vector(mode = "list", length = 12)
+coefs_wofs05 <- data.frame("coef" = c("ndvi_temporal", "veg_herby", "canopy_01", "sl_scaled"))
+
+# fitting models
+
+for(i in 1:12) {
+
+buffalo_subset <- buffalo_model %>% filter(month == i)
+id_length <- length(unique(buffalo_subset$id_num))
+
+buffalo_subset <- buffalo_subset %>% mutate(id_refactor1 = as.numeric(as.factor(id_num)), id_refactor2 = id_refactor1, id_refactor3 = id_refactor1, id_refactor4 = id_refactor1, id_refactor5 = id_refactor1, id_refactor6 = id_refactor1, id_refactor7 = id_refactor1) 
+# id_length <- length(unique(buffalo_subset$id_refactor))
+
+tic()
+m_all <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_subset,
+              # verbose = T,
+              control.compute = list(dic = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_temporal = prec.beta.ndvi,
+                            WOFS05_dist_scaled = prec.beta.wofs05,
+                            WOFS80_dist_scaled = prec.beta.wofs80,
+                            elev_scaled = prec.beta.elev,
+                            slope_scaled = prec.beta.slope,
+                            herby_scaled = prec.beta.herby,
+                            canopy_01 = prec.beta.canopy)
+                )
+              )
+toc()
+
+inla_monthly_models_wofs05[[i]] <- m_all
+# model_name <- paste("model", i, sep = "_")
+coefs_wofs05 <- cbind(coefs_wofs05, m_all$summary.fixed$mean) # beta estimates (mean of posterior)
+
+}
+
+colnames(coefs_wofs05) <- c("coef", 1:12) #paste0("model_", 1:12))
+
+coefs_wofs05
+
+coefs_long <- coefs_wofs05 %>% pivot_longer(cols = !coef, names_to = "model") # %>% filter(coef != "sl_scaled") #%>% dplyr::arrange(model)
+
+coefs_long %>% ggplot(aes(x = as.numeric(model), y = value, colour = coef)) +
+  geom_path(size = 0.5) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  scale_colour_viridis_d("Coefficient") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_bw()
+
+
+# summary(inla_monthly_models_full[[1]])
+
+dic_wofs05 <- c()
+for(i in 1:12) dic_wofs05[i] <- inla_monthly_models_wofs05[[i]]$dic[[1]]
+dic_wofs05
+mean(dic_wofs05)
+
+```
+
+
+
+```{r}
+
+# priors
+
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+prec.beta.wofs05 <- 1e-4
+prec.beta.wofs80 <- 1e-4
+prec.beta.elev <- 1e-4
+prec.beta.slope <- 1e-4
+prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+
+
+# formula
+
+formula.random <- y ~ -1 + 
+  
+  # ndvi_temporal +
+  # WOFS05_dist_scaled +
+  WOFS80_dist_scaled +
+  # elev_scaled +
+  # slope_scaled +
+  # veg_herby +
+  # canopy_01 +
+  sl_scaled  +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  # f(id_refactor1, ndvi_temporal, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  # f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) 
+  # 
+  # f(id_refactor4, elev_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor5, slope_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  # f(id_refactor6, veg_herby, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor7, canopy_01, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+
+# setting up loop
+
+inla_monthly_models_wofs80 <- vector(mode = "list", length = 12)
+coefs_wofs80 <- data.frame("coef" = c("ndvi_temporal", "veg_herby", "canopy_01", "sl_scaled"))
+
+# fitting models
+
+for(i in 1:12) {
+
+buffalo_subset <- buffalo_model %>% filter(month == i)
+id_length <- length(unique(buffalo_subset$id_num))
+
+buffalo_subset <- buffalo_subset %>% mutate(id_refactor1 = as.numeric(as.factor(id_num)), id_refactor2 = id_refactor1, id_refactor3 = id_refactor1, id_refactor4 = id_refactor1, id_refactor5 = id_refactor1, id_refactor6 = id_refactor1, id_refactor7 = id_refactor1) 
+# id_length <- length(unique(buffalo_subset$id_refactor))
+
+tic()
+m_all <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_subset,
+              # verbose = T,
+              control.compute = list(dic = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_temporal = prec.beta.ndvi,
+                            WOFS05_dist_scaled = prec.beta.wofs05,
+                            WOFS80_dist_scaled = prec.beta.wofs80,
+                            elev_scaled = prec.beta.elev,
+                            slope_scaled = prec.beta.slope,
+                            herby_scaled = prec.beta.herby,
+                            canopy_01 = prec.beta.canopy)
+                )
+              )
+toc()
+
+inla_monthly_models_wofs80[[i]] <- m_all
+# model_name <- paste("model", i, sep = "_")
+coefs_wofs80 <- cbind(coefs_wofs80, m_all$summary.fixed$mean) # beta estimates (mean of posterior)
+
+}
+
+colnames(coefs_wofs80) <- c("coef", 1:12) #paste0("model_", 1:12))
+
+coefs_wofs80
+
+coefs_long <- coefs_wofs80 %>% pivot_longer(cols = !coef, names_to = "model") # %>% filter(coef != "sl_scaled") #%>% dplyr::arrange(model)
+
+coefs_long %>% ggplot(aes(x = as.numeric(model), y = value, colour = coef)) +
+  geom_path(size = 0.5) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  scale_colour_viridis_d("Coefficient") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_bw()
+
+
+# summary(inla_monthly_models_full[[1]])
+
+dic_wofs80 <- c()
+for(i in 1:12) dic_wofs80[i] <- inla_monthly_models_wofs80[[i]]$dic[[1]]
+dic_wofs80
+mean(dic_wofs80)
+
+```
+
+
+
+```{r}
+
+# priors
+
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+prec.beta.wofs05 <- 1e-4
+prec.beta.wofs80 <- 1e-4
+prec.beta.elev <- 1e-4
+prec.beta.slope <- 1e-4
+prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+
+
+# formula
+
+formula.random <- y ~ -1 + 
+  
+  # ndvi_temporal +
+  # WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  elev_scaled +
+  # slope_scaled +
+  # veg_herby +
+  # canopy_01 +
+  sl_scaled  +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  # f(id_refactor1, ndvi_temporal, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  # f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  f(id_refactor4, elev_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) 
+  # 
+  # f(id_refactor5, slope_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  # f(id_refactor6, veg_herby, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor7, canopy_01, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+
+# setting up loop
+
+inla_monthly_models_elev <- vector(mode = "list", length = 12)
+coefs_elev <- data.frame("coef" = c("ndvi_temporal", "veg_herby", "canopy_01", "sl_scaled"))
+
+# fitting models
+
+for(i in 1:12) {
+
+buffalo_subset <- buffalo_model %>% filter(month == i)
+id_length <- length(unique(buffalo_subset$id_num))
+
+buffalo_subset <- buffalo_subset %>% mutate(id_refactor1 = as.numeric(as.factor(id_num)), id_refactor2 = id_refactor1, id_refactor3 = id_refactor1, id_refactor4 = id_refactor1, id_refactor5 = id_refactor1, id_refactor6 = id_refactor1, id_refactor7 = id_refactor1) 
+# id_length <- length(unique(buffalo_subset$id_refactor))
+
+tic()
+m_all <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_subset,
+              # verbose = T,
+              control.compute = list(dic = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_temporal = prec.beta.ndvi,
+                            WOFS05_dist_scaled = prec.beta.wofs05,
+                            WOFS80_dist_scaled = prec.beta.wofs80,
+                            elev_scaled = prec.beta.elev,
+                            slope_scaled = prec.beta.slope,
+                            herby_scaled = prec.beta.herby,
+                            canopy_01 = prec.beta.canopy)
+                )
+              )
+toc()
+
+inla_monthly_models_elev[[i]] <- m_all
+# model_name <- paste("model", i, sep = "_")
+coefs_elev <- cbind(coefs_elev, m_all$summary.fixed$mean) # beta estimates (mean of posterior)
+
+}
+
+colnames(coefs_elev) <- c("coef", 1:12) #paste0("model_", 1:12))
+
+coefs_elev
+
+coefs_long <- coefs_elev %>% pivot_longer(cols = !coef, names_to = "model") # %>% filter(coef != "sl_scaled") #%>% dplyr::arrange(model)
+
+coefs_long %>% ggplot(aes(x = as.numeric(model), y = value, colour = coef)) +
+  geom_path(size = 0.5) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  scale_colour_viridis_d("Coefficient") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_bw()
+
+
+summary(inla_monthly_models_elev[[2]])
+
+dic_elev <- c()
+for(i in 1:12) dic_elev[i] <- inla_monthly_models_elev[[i]]$dic[[1]]
+dic_elev
+mean(dic_elev)
+
+```
+
+
+
+```{r}
+
+# priors
+
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+prec.beta.wofs05 <- 1e-4
+prec.beta.wofs80 <- 1e-4
+prec.beta.elev <- 1e-4
+prec.beta.slope <- 1e-4
+prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+
+
+# formula
+
+formula.random <- y ~ -1 + 
+  
+  # ndvi_temporal +
+  # WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  # elev_scaled +
+  slope_scaled +
+  # veg_herby +
+  # canopy_01 +
+  sl_scaled  +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  # f(id_refactor1, ndvi_temporal, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor4, elev_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  f(id_refactor5, slope_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) 
+
+  # f(id_refactor6, veg_herby, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor7, canopy_01, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+
+# setting up loop
+
+inla_monthly_models_slope <- vector(mode = "list", length = 12)
+coefs_slope <- data.frame("coef" = c("ndvi_temporal", "veg_herby", "canopy_01", "sl_scaled"))
+
+# fitting models
+
+for(i in 1:12) {
+
+buffalo_subset <- buffalo_model %>% filter(month == i)
+id_length <- length(unique(buffalo_subset$id_num))
+
+buffalo_subset <- buffalo_subset %>% mutate(id_refactor1 = as.numeric(as.factor(id_num)), id_refactor2 = id_refactor1, id_refactor3 = id_refactor1, id_refactor4 = id_refactor1, id_refactor5 = id_refactor1, id_refactor6 = id_refactor1, id_refactor7 = id_refactor1) 
+# id_length <- length(unique(buffalo_subset$id_refactor))
+
+tic()
+m_all <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_subset,
+              # verbose = T,
+              control.compute = list(dic = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_temporal = prec.beta.ndvi,
+                            WOFS05_dist_scaled = prec.beta.wofs05,
+                            WOFS80_dist_scaled = prec.beta.wofs80,
+                            elev_scaled = prec.beta.elev,
+                            slope_scaled = prec.beta.slope,
+                            herby_scaled = prec.beta.herby,
+                            canopy_01 = prec.beta.canopy)
+                )
+              )
+toc()
+
+inla_monthly_models_slope[[i]] <- m_all
+# model_name <- paste("model", i, sep = "_")
+coefs_slope <- cbind(coefs_slope, m_all$summary.fixed$mean) # beta estimates (mean of posterior)
+
+}
+
+colnames(coefs_slope) <- c("coef", 1:12) #paste0("model_", 1:12))
+
+coefs_slope
+
+coefs_long <- coefs_slope %>% pivot_longer(cols = !coef, names_to = "model") # %>% filter(coef != "sl_scaled") #%>% dplyr::arrange(model)
+
+coefs_long %>% ggplot(aes(x = as.numeric(model), y = value, colour = coef)) +
+  geom_path(size = 0.5) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  scale_colour_viridis_d("Coefficient") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_bw()
+
+
+summary(inla_monthly_models_slope[[1]])
+
+dic_slope <- c()
+for(i in 1:12) dic_slope[i] <- inla_monthly_models_slope[[i]]$dic[[1]]
+dic_slope
+mean(dic_slope)
+
+```
+
+
+```{r}
+
+# priors
+
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+prec.beta.wofs05 <- 1e-4
+prec.beta.wofs80 <- 1e-4
+prec.beta.elev <- 1e-4
+prec.beta.slope <- 1e-4
+prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+
+
+# formula
+
+formula.random <- y ~ -1 + 
+  
+  # ndvi_temporal +
+  # WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  # elev_scaled +
+  # slope_scaled +
+  veg_herby +
+  # canopy_01 +
+  sl_scaled  +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  # f(id_refactor1, ndvi_temporal, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor4, elev_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor5, slope_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) 
+
+  f(id_refactor6, veg_herby, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) 
+  # 
+  # f(id_refactor7, canopy_01, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+
+# setting up loop
+
+inla_monthly_models_herby <- vector(mode = "list", length = 12)
+coefs_herby <- data.frame("coef" = c("ndvi_temporal", "veg_herby", "canopy_01", "sl_scaled"))
+
+# fitting models
+
+for(i in 1:12) {
+
+buffalo_subset <- buffalo_model %>% filter(month == i)
+id_length <- length(unique(buffalo_subset$id_num))
+
+buffalo_subset <- buffalo_subset %>% mutate(id_refactor1 = as.numeric(as.factor(id_num)), id_refactor2 = id_refactor1, id_refactor3 = id_refactor1, id_refactor4 = id_refactor1, id_refactor5 = id_refactor1, id_refactor6 = id_refactor1, id_refactor7 = id_refactor1) 
+# id_length <- length(unique(buffalo_subset$id_refactor))
+
+tic()
+m_all <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_subset,
+              # verbose = T,
+              control.compute = list(dic = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_temporal = prec.beta.ndvi,
+                            WOFS05_dist_scaled = prec.beta.wofs05,
+                            WOFS80_dist_scaled = prec.beta.wofs80,
+                            elev_scaled = prec.beta.elev,
+                            slope_scaled = prec.beta.slope,
+                            herby_scaled = prec.beta.herby,
+                            canopy_01 = prec.beta.canopy)
+                )
+              )
+toc()
+
+inla_monthly_models_herby[[i]] <- m_all
+# model_name <- paste("model", i, sep = "_")
+coefs_herby <- cbind(coefs_herby, m_all$summary.fixed$mean) # beta estimates (mean of posterior)
+
+}
+
+colnames(coefs_herby) <- c("coef", 1:12) #paste0("model_", 1:12))
+
+coefs_herby
+
+coefs_long <- coefs_herby %>% pivot_longer(cols = !coef, names_to = "model") # %>% filter(coef != "sl_scaled") #%>% dplyr::arrange(model)
+
+coefs_long %>% ggplot(aes(x = as.numeric(model), y = value, colour = coef)) +
+  geom_path(size = 0.5) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  scale_colour_viridis_d("Coefficient") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_bw()
+
+
+# summary(inla_monthly_models_full[[1]])
+
+dic_herby <- c()
+for(i in 1:12) dic_herby[i] <- inla_monthly_models_herby[[i]]$dic[[1]]
+dic_herby
+mean(dic_herby)
+
+```
+
+
+
+```{r}
+
+# priors
+
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+prec.beta.wofs05 <- 1e-4
+prec.beta.wofs80 <- 1e-4
+prec.beta.elev <- 1e-4
+prec.beta.slope <- 1e-4
+prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+
+
+# formula
+
+formula.random <- y ~ -1 + 
+  
+  # ndvi_temporal +
+  # WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  # elev_scaled +
+  # slope_scaled +
+  # veg_herby +
+  canopy_01 +
+  sl_scaled  +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  # f(id_refactor1, ndvi_temporal, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor2, WOFS05_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor4, elev_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  # f(id_refactor5, slope_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) 
+
+  # f(id_refactor6, veg_herby, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  # 
+  f(id_refactor7, canopy_01, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+
+# setting up loop
+
+inla_monthly_models_canopy <- vector(mode = "list", length = 12)
+coefs_canopy <- data.frame("coef" = c("ndvi_temporal", "veg_herby", "canopy_01", "sl_scaled"))
+
+# fitting models
+
+for(i in 1:12) {
+
+buffalo_subset <- buffalo_model %>% filter(month == i)
+id_length <- length(unique(buffalo_subset$id_num))
+
+buffalo_subset <- buffalo_subset %>% mutate(id_refactor1 = as.numeric(as.factor(id_num)), id_refactor2 = id_refactor1, id_refactor3 = id_refactor1, id_refactor4 = id_refactor1, id_refactor5 = id_refactor1, id_refactor6 = id_refactor1, id_refactor7 = id_refactor1) 
+# id_length <- length(unique(buffalo_subset$id_refactor))
+
+tic()
+m_all <- inla(formula.random, 
+              family = "Poisson", 
+              data = buffalo_subset,
+              # verbose = T,
+              control.compute = list(dic = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_temporal = prec.beta.ndvi,
+                            WOFS05_dist_scaled = prec.beta.wofs05,
+                            WOFS80_dist_scaled = prec.beta.wofs80,
+                            elev_scaled = prec.beta.elev,
+                            slope_scaled = prec.beta.slope,
+                            herby_scaled = prec.beta.herby,
+                            canopy_01 = prec.beta.canopy)
+                )
+              )
+toc()
+
+inla_monthly_models_canopy[[i]] <- m_all
+# model_name <- paste("model", i, sep = "_")
+coefs_canopy <- cbind(coefs_canopy, m_all$summary.fixed$mean) # beta estimates (mean of posterior)
+
+}
+
+colnames(coefs_canopy) <- c("coef", 1:12) #paste0("model_", 1:12))
+
+coefs_canopy
+
+coefs_long <- coefs_canopy %>% pivot_longer(cols = !coef, names_to = "model") # %>% filter(coef != "sl_scaled") #%>% dplyr::arrange(model)
+
+coefs_long %>% ggplot(aes(x = as.numeric(model), y = value, colour = coef)) +
+  geom_path(size = 0.5) +
+  geom_point() +
+  scale_x_continuous(breaks = seq(1,12,1)) +
+  scale_colour_viridis_d("Coefficient") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_bw()
+
+
+# summary(inla_monthly_models_full[[1]])
+
+dic_canopy <- c()
+for(i in 1:12) dic_canopy[i] <- inla_monthly_models_canopy[[i]]$dic[[1]]
+dic_canopy
+mean(dic_canopy)
+
+```
+
+
+
+```{r}
+
+summary(inla_monthly_models[[1]])
+
+```
+
+
+
+# INLA model with 2 harmonics
+
+- add in delta elevation for stochastic simulation model 
+- add in slope?
+
+```{r}
+
+formula.random <- y ~ -1 +
+
+  ndvi_temporal +
+  slope_scaled +
+  veg_herby +
+  canopy_scaled +
+  sl +
+  log_sl +
+  cos_ta +
+
+  ndvi_temporal * month_s1 +
+  ndvi_temporal * month_s2 +
+  ndvi_temporal * month_c1 +
+  ndvi_temporal * month_c2 +
+  
+  slope_scaled * month_s1 +
+  slope_scaled * month_s2 +
+  slope_scaled * month_c1 +
+  slope_scaled * month_c2 +
+
+  veg_herby * month_s1 +
+  veg_herby * month_s2 +
+  veg_herby * month_c1 +
+  veg_herby * month_c2 +
+
+  canopy_scaled * month_s1 +
+  canopy_scaled * month_s2 +
+  canopy_scaled * month_c1 +
+  canopy_scaled * month_c2 +
+  
+  sl * month_s1 +
+  sl * month_s2 +
+  sl * month_c1 +
+  sl * month_c2 +
+  
+  log_sl * month_s1 +
+  log_sl * month_s2 +
+  log_sl * month_c1 +
+  log_sl * month_c2 +
+  
+  cos_ta * month_s1 +
+  cos_ta * month_s2 +
+  cos_ta * month_c1 +
+  cos_ta * month_c2 +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  f(id1, ndvi_temporal, values=1:2,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id2, slope_scaled, values=1:2,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id3, veg_herby, values=1:2,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id4, canopy_scaled, values=1:2,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id5, sl, values=1:2,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id6, log_sl, values=1:2,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id7, cos_ta, values=1:2,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+```
+
+
+
+
+```{r}
+
+formula.random <- y ~ -1 +
+
+  ndvi_temporal +
+  # WOFS05_dist_scaled +
+  # WOFS80_dist_scaled +
+  # elev_scaled +
+  slope_scaled +
+  veg_herby +
+  canopy_01 +
+  sl_scaled  +
+
+  ndvi_temporal * month_s1 +
+  ndvi_temporal * month_s2 +
+  # ndvi_temporal * month_s3 +
+  ndvi_temporal * month_c1 +
+  ndvi_temporal * month_c2 +
+  # ndvi_temporal * month_c3 +
+  
+  # WOFS05_dist_scaled * month_s1 +
+  # WOFS05_dist_scaled * month_s2 +
+  # WOFS05_dist_scaled * month_s3 +
+  # WOFS05_dist_scaled * month_c1 +
+  # WOFS05_dist_scaled * month_c2 +
+  # WOFS05_dist_scaled * month_c3 +
+  
+  # WOFS80_dist_scaled * month_s1 +
+  # WOFS80_dist_scaled * month_s2 +
+  # WOFS80_dist_scaled * month_s3 +
+  # WOFS80_dist_scaled * month_c1 +
+  # WOFS80_dist_scaled * month_c2 +
+  # WOFS80_dist_scaled * month_c3 +
+  
+  # elev_scaled * month_s1 +
+  # elev_scaled * month_s2 +
+  # elev_scaled * month_s3 +
+  # elev_scaled * month_c1 +
+  # elev_scaled * month_c2 +
+  # elev_scaled * month_c3 +
+  
+  slope_scaled * month_s1 +
+  slope_scaled * month_s2 +
+  # slope_scaled * month_s3 +
+  slope_scaled * month_c1 +
+  slope_scaled * month_c2 +
+  # slope_scaled * month_c3 +
+
+  veg_herby * month_s1 +
+  veg_herby * month_s2 +
+  # veg_herby * month_s3 +
+  veg_herby * month_c1 +
+  veg_herby * month_c2 +
+  # veg_herby * month_c3 +
+
+  canopy_01 * month_s1 +
+  canopy_01 * month_s2 +
+  # canopy_01 * month_s3 +
+  canopy_01 * month_c1 +
+  canopy_01 * month_c2 +
+  # canopy_01 * month_c3 +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  f(id1, ndvi_temporal, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  f(id2, ndvi_temporal, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  f(id3, ndvi_temporal, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  f(id4, ndvi_temporal, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  f(id5, ndvi_temporal, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  # f(id2, ndwi_temporal, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  # f(id2, WOFS05_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  # f(id3, WOFS80_dist_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  # f(id4, elev_scaled, values=1:14,model="iid",
+  #   hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id2, slope_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id3, veg_herby, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id4, canopy_01, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+```
+
+
+
+```{r}
+ 
+mean.beta <- 0
+prec.beta <- 1e-4
+# prec.beta.ndvi <- 1e-4
+# prec.beta.slope <- 1e-4
+# prec.beta.herby <- 1e-4
+# prec.beta.canopy <- 1e-4
+
+```
+
+
+```{r}
+
+buffalo_subset <- buffalo_inla %>% filter(year == 2018 & (month == 11 | month == 12) & (id == 2005 | id == 2014))
+
+n_inds <- length(unique(buffalo_subset$id1))
+
+```
+
+
+```{r}
+
+# inla.setOption(enable.inla.argument.weights=TRUE) #doesn't work but seems to work without
+# inla.getOption()
+
+tic()
+m_all <- inla(formula.random,
+              family = "Poisson",
+              data = buffalo_subset,
+              # verbose = T,
+              control.compute = list(dic = TRUE, waic = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = prec.beta
+                  # list(ndvi_temporal = prec.beta.ndvi,
+                  #           WOFS05_dist_scaled = prec.beta.wofs05,
+                  #           WOFS80_dist_scaled = prec.beta.wofs80,
+                  #           elev_scaled = prec.beta.elev,
+                  #           slope_scaled = prec.beta.slope,
+                  #           herby_scaled = prec.beta.herby,
+                  #           canopy_01 = prec.beta.canopy)
+                )
+              )
+toc()
+
+# m_3harmonics_full <- m_all
+# m_harmonics_slope_dem <- m_all
+
+```
+
+
+
+```{r}
+
+# m_all <- m_harmonics_unscaled
+
+plot(m_all)
+
+summary(m_all)
+m_all$summary.fixed
+# m_all$summary.hyperpar
+
+coef_means <- m_all$summary.fixed$mean[-5:-11]
+coef_sds <- m_all$summary.fixed$sd[-5:-11]
+
+```
+
+
+
+
+### INLA model with 2 harmonics
+
+```{r}
+
+formula.random <- y ~ -1 +
+
+  ndvi_temporal +
+  WOFS05_dist_scaled +
+  WOFS80_dist_scaled +
+  elev_scaled +
+  slope_scaled +
+  veg_herby +
+  canopy_01 +
+  sl_scaled  +
+
+  ndvi_temporal * month_s1 +
+  ndvi_temporal * month_s2 +
+  ndvi_temporal * month_c1 +
+  ndvi_temporal * month_c2 +
+  
+  WOFS05_dist_scaled * month_s1 +
+  WOFS05_dist_scaled * month_s2 +
+  WOFS05_dist_scaled * month_c1 +
+  WOFS05_dist_scaled * month_c2 +
+  
+  WOFS80_dist_scaled * month_s1 +
+  WOFS80_dist_scaled * month_s2 +
+  WOFS80_dist_scaled * month_c1 +
+  WOFS80_dist_scaled * month_c2 +
+  
+  elev_scaled * month_s1 +
+  elev_scaled * month_s2 +
+  elev_scaled * month_c1 +
+  elev_scaled * month_c2 +
+  
+  slope_scaled * month_s1 +
+  slope_scaled * month_s2 +
+  slope_scaled * month_c1 +
+  slope_scaled * month_c2 +
+
+  veg_herby * month_s1 +
+  veg_herby * month_s2 +
+  veg_herby * month_c1 +
+  veg_herby * month_c2 +
+
+  canopy_01 * month_s1 +
+  canopy_01 * month_s2 +
+  canopy_01 * month_c1 +
+  canopy_01 * month_c2 +
+
+  f(step_aligned, model = "iid", hyper = list(theta = list(initial = log(1e-6), fixed = T))) +
+
+  f(id1, ndvi_temporal, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id2, WOFS05_dist_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id3, WOFS80_dist_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id4, elev_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+  
+  f(id5, slope_scaled, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id6, veg_herby, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05)))) +
+
+  f(id7, canopy_01, values=1:14,model="iid",
+    hyper=list(theta=list(initial=log(1),fixed=F,prior="pc.prec",param=c(3,0.05))))
+
+```
+
+
+
+```{r}
+ 
+mean.beta <- 0
+prec.beta.ndvi <- 1e-4
+prec.beta.wofs05 <- 1e-4
+prec.beta.wofs80 <- 1e-4
+prec.beta.elev <- 1e-4
+prec.beta.slope <- 1e-4
+prec.beta.herby <- 1e-4
+prec.beta.canopy <- 1e-4
+
+```
+
+
+
+```{r}
+
+tic()
+m_2harmonics_full <- inla(formula.random,
+              family = "Poisson",
+              data = buffalo_model,
+              # verbose = T,
+              control.compute = list(dic = TRUE),
+              control.fixed = list(
+                mean = mean.beta,
+                prec = list(ndvi_temporal = prec.beta.ndvi,
+                            WOFS05_dist_scaled = prec.beta.wofs05,
+                            WOFS80_dist_scaled = prec.beta.wofs80,
+                            elev_scaled = prec.beta.elev,
+                            slope_scaled = prec.beta.slope,
+                            herby_scaled = prec.beta.herby,
+                            canopy_01 = prec.beta.canopy)
+                )
+              )
+toc()
+
+```
+
+
+
+```{r}
+
+plot(m_2harmonics_full)
+
+summary(m_2harmonics_full)
+m_2harmonics_full$summary.fixed
+# m_2harmonics_full$summary.hyperpar
+
+# coef_means <- m_2harmonics_full$summary.fixed$mean[-5:-11]
+# coef_sds <- m_2harmonics_full$summary.fixed$sd[-5:-11]
+
+```
