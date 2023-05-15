@@ -24,13 +24,20 @@ knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
 
-# install_cmdstan()
-
-packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", "RColorBrewer", "patchwork", "ecospat", "ggmap", "basemaps", "mapedit", "sf", "rstan", "brms", "beepr", "cmdstanr")
-walk(packages, require, character.only = T)
-
+library(rstan)
 rstan_options(auto_write = TRUE)
 options(mc.cores = parallel::detectCores())
+
+# install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+# remotes::install_github("stan-dev/cmdstanr")
+# library(cmdstanr)
+# install_cmdstan(dir = "C:/Users/n11207361", cores = 2, overwrite = TRUE)
+
+# set_cmdstan_path("C:/cmdstan")
+# cmdstan_path()
+
+packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", "RColorBrewer", "patchwork", "ecospat", "ggmap", "basemaps", "mapedit", "sf", "brms", "beepr", "shinystan")
+walk(packages, require, character.only = T)
 
 ```
 
@@ -41,7 +48,7 @@ Creating stan-specific covariates (i.e. something like a design matrix)
 
 ```{r}
 
-buffalo_CLR_year <- buffalo_CLR_year %>% mutate(
+buffalo_CLR_year_harmonics <- buffalo_CLR_year %>% mutate(
   
                             ndvi_s1 = ndvi_scaled[,1] * yday_s1,
                             ndvi_s2 = ndvi_scaled[,1] * yday_s2,
@@ -52,6 +59,16 @@ buffalo_CLR_year <- buffalo_CLR_year %>% mutate(
                             ndvi_c3 = ndvi_scaled[,1] * yday_c3,
                             ndvi_c4 = ndvi_scaled[,1] * yday_c4,
                             
+                            ndvi_2 = ndvi_scaled[,1]^2,
+                            ndvi_2_s1 = ndvi_2 * yday_s1,
+                            ndvi_2_s2 = ndvi_2 * yday_s2,
+                            ndvi_2_s3 = ndvi_2 * yday_s3,
+                            ndvi_2_s4 = ndvi_2 * yday_s4,
+                            ndvi_2_c1 = ndvi_2 * yday_c1,
+                            ndvi_2_c2 = ndvi_2 * yday_c2,
+                            ndvi_2_c3 = ndvi_2 * yday_c3,
+                            ndvi_2_c4 = ndvi_2 * yday_c4,
+                            
                             canopy_s1 = canopy_scaled[,1] * yday_s1,
                             canopy_s2 = canopy_scaled[,1] * yday_s2,
                             canopy_s3 = canopy_scaled[,1] * yday_s3,
@@ -61,6 +78,16 @@ buffalo_CLR_year <- buffalo_CLR_year %>% mutate(
                             canopy_c3 = canopy_scaled[,1] * yday_c3,
                             canopy_c4 = canopy_scaled[,1] * yday_c4,
                             
+                            canopy_2 = canopy_scaled[,1]^2,
+                            canopy_2_s1 = canopy_2 * yday_s1,
+                            canopy_2_s2 = canopy_2 * yday_s2,
+                            canopy_2_s3 = canopy_2 * yday_s3,
+                            canopy_2_s4 = canopy_2 * yday_s4,
+                            canopy_2_c1 = canopy_2 * yday_c1,
+                            canopy_2_c2 = canopy_2 * yday_c2,
+                            canopy_2_c3 = canopy_2 * yday_c3,
+                            canopy_2_c4 = canopy_2 * yday_c4,
+                            
                             sl_s1 = sl * yday_s1,
                             sl_s2 = sl * yday_s2,
                             sl_s3 = sl * yday_s3,
@@ -69,6 +96,15 @@ buffalo_CLR_year <- buffalo_CLR_year %>% mutate(
                             sl_c2 = sl * yday_c2,
                             sl_c3 = sl * yday_c3,
                             sl_c4 = sl * yday_c4,
+                            
+                            sl_scaled_s1 = sl_scaled * yday_s1,
+                            sl_scaled_s2 = sl_scaled * yday_s2,
+                            sl_scaled_s3 = sl_scaled * yday_s3,
+                            sl_scaled_s4 = sl_scaled * yday_s4,
+                            sl_scaled_c1 = sl_scaled * yday_c1,
+                            sl_scaled_c2 = sl_scaled * yday_c2,
+                            sl_scaled_c3 = sl_scaled * yday_c3,
+                            sl_scaled_c4 = sl_scaled * yday_c4,
                             
                             log_sl_s1 = log_sl * yday_s1,
                             log_sl_s2 = log_sl * yday_s2,
@@ -152,8 +188,8 @@ Thinning the pseudo-absences
 
 ```{r}
 
-buffalo_CLR_year %>% dplyr::group_by(id, step_id) %>% dplyr::summarise(n=n())
-buffalo_CLR_year_3pts <- buffalo_CLR_year %>% dplyr::group_by(id, step_id) %>% dplyr::slice_head(n = 4) %>%  # only keep 3 random points per used point
+buffalo_CLR_year_harmonics %>% dplyr::group_by(id, step_id) %>% dplyr::summarise(n=n())
+buffalo_CLR_year_3pts <- buffalo_CLR_year_harmonics %>% dplyr::group_by(id, step_id) %>% dplyr::slice_head(n = 4) %>%  # only keep 3 random points per used point
   dplyr::ungroup()
 
 head(buffalo_CLR_year_3pts)
@@ -171,9 +207,14 @@ Create a subset of the data to use in the stan model
 #   mutate(id_num = as.numeric(factor(id)), step_id = step_id_, log_sl = log_sl_, cos_ta = cos_ta_) %>% 
 #   dplyr::select(id, id_num, ndvi_temporal, ndwi_temporal, y, step_id)
 
+# choose one for subsetting
+# buffalo_CLR_year_3pts
+# buffalo_CLR_year_harmonics
+
+# buffalo_subset <- buffalo_CLR_year_harmonics %>%
 buffalo_subset <- buffalo_CLR_year_3pts %>%
   # filter(year == 2019 & month == 11) %>% 
-  filter(id == 2005 | id == 2014)  %>% 
+  # filter(id == 2005 | id == 2014)  %>%
   mutate(id_num = as.numeric(factor(id))) %>% 
   dplyr::select(id, 
                 id_num, 
@@ -188,6 +229,16 @@ buffalo_subset <- buffalo_CLR_year_3pts %>%
                 ndvi_c3,
                 ndvi_c4,
                 
+                ndvi_2, 
+                ndvi_2_s1,
+                ndvi_2_s2,
+                ndvi_2_s3,
+                ndvi_2_s4,
+                ndvi_2_c1,
+                ndvi_2_c2,
+                ndvi_2_c3,
+                ndvi_2_c4,
+                
                 # herby_scaled, 
                 
                 canopy_scaled,
@@ -199,6 +250,16 @@ buffalo_subset <- buffalo_CLR_year_3pts %>%
                 canopy_c2,
                 canopy_c3,
                 canopy_c4,
+                
+                canopy_2, 
+                canopy_2_s1,
+                canopy_2_s2,
+                canopy_2_s3,
+                canopy_2_s4,
+                canopy_2_c1,
+                canopy_2_c2,
+                canopy_2_c3,
+                canopy_2_c4,
                 
                 y, 
                 step_id, 
@@ -213,6 +274,16 @@ buffalo_subset <- buffalo_CLR_year_3pts %>%
                 sl_c2,
                 sl_c3,
                 sl_c4,
+                
+                sl_scaled, 
+                sl_scaled_s1,
+                sl_scaled_s2,
+                sl_scaled_s3,
+                sl_scaled_s4,
+                sl_scaled_c1,
+                sl_scaled_c2,
+                sl_scaled_c3,
+                sl_scaled_c4,
                 
                 log_sl, 
                 log_sl_s1,
@@ -233,6 +304,7 @@ buffalo_subset <- buffalo_CLR_year_3pts %>%
                 cos_ta_c2,
                 cos_ta_c3,
                 cos_ta_c4) %>% 
+  
   drop_na(cos_ta)
 
 sum(is.na(buffalo_subset$cos_ta))
@@ -274,7 +346,7 @@ model <- "data {
 }
 
 parameters {
-  vector[6] beta; // fixed effects
+  vector[5] beta; // fixed effects
   vector[I] a_re; // RE for steps
   vector[J] i_re_ndvi; // RE effects for each individual - NDVI
   //vector[J] i_re_herby; // RE effects for each individual - Herbaceous vegetation
@@ -297,7 +369,7 @@ model {
   // unpopular - half-normal / T instead (lower = 0) - try tight parameters
 
   sigmaind ~ normal(0.0, 1.0); 
-  beta ~ normal(0.0, 1.0);
+  beta ~ normal(0.0, sigmaind);
   a_re ~ normal(0.0, 1000000.0);
   i_re_ndvi ~ normal(0.0, sigmaind);
   //i_re_herby ~ normal(0.0, sigmaind);
@@ -390,7 +462,7 @@ Preparing data for stan
 ```{r}
 
 stan_dat <- list(N = nrow(buffalo_subset), 
-                 I = length(unique(buffalo_subset$step_aligned)), 
+                 I = length(unique(buffalo_subset$step_id)), 
                  J = length(unique(buffalo_subset$id_num)), 
                  y = buffalo_subset$y, 
                  ndvi = buffalo_subset$ndvi_scaled[,1], 
@@ -399,17 +471,26 @@ stan_dat <- list(N = nrow(buffalo_subset),
                  sl = buffalo_subset$sl,
                  log_sl = buffalo_subset$log_sl,
                  cos_ta = buffalo_subset$cos_ta,
-                 stepid = as.numeric(factor(buffalo_subset$step_aligned)), 
+                 stepid = as.numeric(factor(buffalo_subset$step_id)), 
                  indid = buffalo_subset$id_num)
 
 ```
 
 
+Fitting the model
 
 ```{r}
 
 tic()
-res_stan_mvmt <- sampling(stan_mod, stan_dat, cores = 4, chains = 1, iter = 200)
+res_stan_mvmt <- optimizing(stan_mod, stan_dat, init = "0")
+toc()
+
+tic()
+res_stan_mvmt <- sampling(stan_mod, stan_dat, init = "0", cores = 4, chains = 2, iter = 1000)
+toc()
+
+tic()
+res_stan_mvmt_vb <- vb(stan_mod, stan_dat, init = "0")
 toc()
 
 # system("killall R")
@@ -422,6 +503,8 @@ beep(sound = 2)
 Checking summaries and sampling diagnostics
 
 ```{r}
+
+res_stan_mvmt
 
 summary(res_stan_mvmt)$summary[1:10, ]
 tail(summary(res_stan_mvmt)$summary)
@@ -606,6 +689,43 @@ model {
     y[i] ~ poisson_log(mu);
 
   }
+
+}
+"
+
+```
+
+
+Stan model with harmonics with matrix parameterisation
+
+```{r}
+
+model <- "data {
+  
+  int<lower=1> N; // no data points
+  int<lower=1> K; // no parameters
+  int<lower=1> I; // no steps (over all individuals)
+  int<lower=1> J; // no individuals
+  
+  int<lower=0> y[N]; // response
+  
+  matrix[N, K] x; // predictor/design matrix
+  
+}
+
+parameters {
+
+
+
+
+}
+
+model {
+
+
+
+
+}
 
 }
 "
@@ -1077,6 +1197,7 @@ launch_shinystan(model)
 ```
 
 
+For checking with conditional logistic regression
 
 ```{r}
 
@@ -1106,40 +1227,243 @@ AIC(clogit_model)
 ```
 
 
-
 ### brms
+
+Generate stan code using brms
+
+```{r}
+
+formula_qr <- brmsformula(formula = 
+                            
+                            y ~ -1 +
+                            
+                            ndvi_scaled +
+                            # ndvi_2 +
+                            # ndvi_s1 +
+                            # ndvi_s2 +
+                            # ndvi_c1 +
+                            # ndvi_c2 +
+                            
+                            canopy_scaled +
+                            # canopy_2 +
+                            # canopy_s1 +
+                            # canopy_s2 +
+                            # canopy_c1 +
+                            # canopy_c2 +
+                            
+                            sl_scaled +
+                            log_sl +
+                            cos_ta +
+                            
+                            (1 | step_id) +
+                            (1 | id),# +
+                            # (0 + ndvi_scaled)
+                            # (0 + ndvi_scaled | id) +
+                            # (0 + ndvi_s1 | id) +
+                            # (0 + ndvi_s2 | id) +
+                            # (0 + ndvi_c1 | id) +
+                            # (0 + ndvi_c2 | id) +
+                            # (0 + ndvi_2 | id) +
+                            # (0 + canopy_scaled | id) +
+                            # (0 + canopy_s1 | id) +
+                            # (0 + canopy_s2 | id) +
+                            # (0 + canopy_c1 | id), # +
+                            # (0 + canopy_c2 | id),
+                            # (0 + canopy_2 | id),
+                            # (0 + sl_scaled | id) +
+                            # (0 + log_sl | id) +
+                            # (0 + cos_ta | id),
+                            decomp = "QR",
+                            family = poisson(link = log))
+                            
+                    
+                  
+                            # y ~ -1 +
+                            # ndvi_scaled +
+                            # sl +
+                            # log_sl +
+                            # cos_ta
+                            # (1 | id / step_id)
+                            # ,
+                            # family = poisson(link = log),
+                            # decomp = "QR")
+
+# setting the priors
+brms_priors <- c(set_prior("normal(0,1)", class = "b"),
+                 set_prior("normal(0,1)", class = "sd")
+                 # set_prior("constant(1000000)", class = "sd", coef = "Intercept", group = "step_id"),
+                 # set_prior("normal(0,1000000)", class = "sd", group = "step_id")
+                 )
+
+get_prior(formula_qr,
+          data = buffalo_subset)
+
+brms_stancode <- make_stancode(formula_qr,
+              data = buffalo_subset,
+              prior = brms_priors)
+
+brms_stancode
+
+brms_standata <- make_standata(formula_qr,
+              data = buffalo_subset,
+              prior = brms_priors)
+
+unique(brms_standata$J_2)
+
+# brms_standata
+
+```
+
+
+```{r}
+
+brms_stancode_edited <- "data {
+
+  int<lower=1> N;  // total number of observations
+  int Y[N];  // response variable
+  int<lower=1> K;  // number of population-level effects
+  matrix[N, K] X;  // population-level design matrix
+  // data for group-level effects of ID 1
+  int<lower=1> N_1;  // number of grouping levels
+  int<lower=1> M_1;  // number of coefficients per level
+  int<lower=1> J_1[N];  // grouping indicator per observation
+  // group-level predictor values
+  vector[N] Z_1_1;
+  // data for group-level effects of ID 2
+  int<lower=1> N_2;  // number of grouping levels
+  int<lower=1> M_2;  // number of coefficients per level
+  int<lower=1> J_2[N];  // grouping indicator per observation
+  // group-level predictor values
+  vector[N] Z_2_1;
+  int prior_only;  // should the likelihood be ignored?
+}
+
+transformed data {
+  // matrices for QR decomposition
+  matrix[N, K] XQ;
+  matrix[K, K] XR;
+  matrix[K, K] XR_inv;
+  // compute and scale QR decomposition
+  XQ = qr_thin_Q(X) * sqrt(N - 1);
+  XR = qr_thin_R(X) / sqrt(N - 1);
+  XR_inv = inverse(XR);
+}
+
+parameters {
+  vector[K] bQ;  // regression coefficients at QR scale
+  vector<lower=0>[M_1] sd_1;  // group-level standard deviations
+  vector[N_1] z_1[M_1];  // standardized group-level effects
+  vector<lower=0>[M_2] sd_2;  // group-level standard deviations
+  // vector[N_2] z_2[M_2];  // standardized group-level effects
+}
+
+transformed parameters {
+  vector[N_1] r_1_1;  // actual group-level effects
+  vector[N_2] r_2_1;  // actual group-level effects
+  real lprior = 0;  // prior contributions to the log posterior
+  r_1_1 = (sd_1[1] * (z_1[1]));
+  
+  // changed code
+  // r_2_1 = (sd_2[1] * (z_2[1])); // code removed
+  r_2_1 = (100 * (z_2[1]));
+  
+  lprior += normal_lpdf(bQ | 0,1);
+  lprior += normal_lpdf(sd_1 | 0,1)
+    - 1 * normal_lccdf(0 | 0,1);
+  lprior += normal_lpdf(sd_2 | 0,1)
+    - 1 * normal_lccdf(0 | 0,1);
+}
+
+model {
+  // likelihood including constants
+  
+  if (!prior_only) {
+    // initialize linear predictor term
+    vector[N] mu = rep_vector(0.0, N);
+    for (n in 1:N) {
+      // add more terms to the linear predictor
+      mu[n] += r_1_1[J_1[n]] * Z_1_1[n] + r_2_1[J_2[n]] * Z_2_1[n];
+    }
+    
+    target += poisson_log_glm_lpmf(Y | XQ, mu, bQ);
+  }
+  
+  // priors including constants
+  target += lprior;
+  target += std_normal_lpdf(z_1[1]);
+  target += std_normal_lpdf(z_2[1]);
+}
+
+generated quantities {
+  // obtain the actual coefficients
+  vector[K] b = XR_inv * bQ;
+}
+
+"
+
+```
+
+Fit the model
 
 ```{r}
 
 tic()
 
-brms_mod <- brm(formula = y ~ -1 +
-                  ndvi_temporal +
-                  # ndwi_temporal +
-                  # veg_herby +
-                  # canopy_cover +
-                  log_sl +
-                  cos_ta +
-                  (0 + ndvi_temporal | id),
-                  # (0 + ndwi_temporal | id) +
-                  # (0 + veg_herby | id) +
-                  # (0 + canopy_cover | id), 
-                data = buffalo_subset,
-                family = poisson(link = log),
-                prior = set_prior("normal(0,10", class = "b"),
-                warmup = 1000,
-                iter = 5000,
-                chains = 4)
+brms_mod3 <- brm(formula = formula_qr,
+                 data = buffalo_subset,
+                 prior = brms_priors,
+                 # warmup = 100,
+                 init = "0",
+                 # iter = 1000, chains = 2, algorithm =  "sampling"
+                 iter = 100000, algorithm =  "meanfield" # variational inference
+                # algorithm = "fixed_param"
+              )
 
 toc()
 
+```
+
+Model outputs
+
+```{r}
+
 summary(brms_mod, waic = TRUE)
-plot(brms_mod)
-post_pred_subset <- posterior_predict(brms_mod, 
-                                      resp = "ndvi_temporal",
-                                      ndraws = 100)
+plot(brms_mod, ask = FALSE)
+
+summary(brms_mod2, waic = TRUE)
+plot(brms_mod2, ask = FALSE)
+
+# launch_shinystan(brms_mod)
+# 
+# post_pred_subset <- posterior_predict(brms_mod, 
+#                                       resp = "ndvi_temporal",
+#                                       ndraws = 100)
 
 ```
+
+Using the brms stan code directly in stan so I can use the optimisation function as well
+
+```{r}
+
+tic()
+brms_stan_mod <- stan_model(model_code = brms_stancode_edited)
+toc()
+
+tic()
+brms_stan_optim <- sampling(brms_stan_mod, brms_standata)
+toc()
+
+tic()
+brms_stan_optim <- optimizing(brms_stan_mod, brms_standata)
+toc()
+
+head(brms_stan_optim$par, 50)
+tail(brms_stan_optim$par, 50)
+
+```
+
+
+
 
 
 ```{r}
