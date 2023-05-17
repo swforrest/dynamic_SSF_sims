@@ -184,6 +184,7 @@ ggplot() +
 
 ```
 
+
 Thinning the pseudo-absences
 
 ```{r}
@@ -199,7 +200,7 @@ head(buffalo_CLR_year_3pts)
 
 Create a subset of the data to use in the stan model
 
-```{r}
+```{r design matrix}
 
 # buffalo_subset <- buffalo_all_covs %>% 
 #   filter(year == 2018 & (month == 11 | month == 12) & (id == 2005 | id == 2018)) %>% 
@@ -324,7 +325,7 @@ unique(buffalo_subset$id_num)
 
 Stan model without harmonic terms
 
-```{r}
+```{r stan code}
 
 model <- "data {
   

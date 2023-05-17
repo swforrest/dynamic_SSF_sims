@@ -19,13 +19,13 @@ Import packages
 options(scipen=999)
 
 # install.packages("dplyr")
-# install.packages("dplyr")
+# install.packages("forecast")
 
 library(tidyverse)
 
 packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", 
               "RColorBrewer", "patchwork", "ecospat", "ggmap", "basemaps", "mapedit", 
-              "sf", "ggpubr", "circular")
+              "sf", "ggpubr", "circular", "forecast")
 
 walk(packages, require, character.only = T)
 
@@ -81,14 +81,22 @@ buffalo_CLR <- buffalo_data %>%
          month_c2 = cos(4*pi*month/12),
          month_c3 = cos(6*pi*month/12),
          month_c4 = cos(8*pi*month/12),
+         
          yday_s1 = sin(2*pi*yday/365),
          yday_s2 = sin(4*pi*yday/365),
          yday_s3 = sin(6*pi*yday/365),
          yday_s4 = sin(8*pi*yday/365),
+         yday_s5 = sin(10*pi*yday/365),
+         yday_s6 = sin(12*pi*yday/365),
+         
          yday_c1 = cos(2*pi*yday/365),
          yday_c2 = cos(4*pi*yday/365),
          yday_c3 = cos(6*pi*yday/365),
-         yday_c4 = cos(8*pi*yday/365)) %>%
+         yday_c4 = cos(8*pi*yday/365),
+         yday_c5 = cos(10*pi*yday/365),
+         yday_c6 = cos(12*pi*yday/365)
+         
+         ) %>%
   drop_na(c(ndvi_temporal, veg_herby, canopy_01, sl_)) %>% 
   dplyr::select(!(burst_:case_))
 
@@ -230,19 +238,32 @@ movement_parameters_year <- movement_parameters %>% filter(id %in% buffalo_year_
 
 ```{r}
 
+# fourier(buffalo_CLR_year$ndvi_scaled[,1], K = 1)
+
+# auto.arima()
+
 formula_clr <- y ~ 
-               
-               ndvi_scaled +
-               yday_s1:ndvi_scaled +
-               yday_s2:ndvi_scaled +
-               yday_c1:ndvi_scaled +
-               yday_c2:ndvi_scaled +
   
-               I(ndvi_scaled^2) +
-               yday_s1:I(ndvi_scaled^2) +
-               yday_s2:I(ndvi_scaled^2) +
-               yday_c1:I(ndvi_scaled^2) +
-               yday_c2:I(ndvi_scaled^2) +
+  ndvi_scaled +
+  yday_s1:ndvi_scaled +
+  yday_s2:ndvi_scaled +
+  yday_s3:ndvi_scaled +
+  yday_s4:ndvi_scaled +
+  # yday_s5:ndvi_scaled +
+  # yday_s6:ndvi_scaled +
+  
+  yday_c1:ndvi_scaled +
+  yday_c2:ndvi_scaled +
+  yday_c3:ndvi_scaled +
+  yday_c4:ndvi_scaled +
+  # yday_c5:ndvi_scaled +
+  # yday_c6:ndvi_scaled +
+  
+               # I(ndvi_scaled^2) +
+               # yday_s1:I(ndvi_scaled^2) +
+               # yday_s2:I(ndvi_scaled^2) +
+               # yday_c1:I(ndvi_scaled^2) +
+               # yday_c2:I(ndvi_scaled^2) +
                
                # WOFS05_dist_scaled +
                # month_s1:WOFS05_dist_scaled +
@@ -276,36 +297,72 @@ formula_clr <- y ~
                # yday_s2:herby_scaled +
                # yday_c1:herby_scaled +
                # yday_c2:herby_scaled +
-               
-               canopy_scaled +
-               yday_s1:canopy_scaled +
-               yday_s2:canopy_scaled +
-               yday_c1:canopy_scaled +
-               yday_c2:canopy_scaled +
+
+  canopy_scaled +
+  yday_s1:canopy_scaled +
+  yday_s2:canopy_scaled +
+  yday_s3:canopy_scaled +
+  yday_s4:canopy_scaled +
+  # yday_s5:canopy_scaled +
+  # yday_s6:canopy_scaled +
   
-               I(canopy_scaled^2) +
-               yday_s1:I(canopy_scaled^2) +
-               yday_s2:I(canopy_scaled^2) +
-               yday_c1:I(canopy_scaled^2) +
-               yday_c2:I(canopy_scaled^2) +
-               
-               sl +
-               yday_s1:sl +
-               yday_s2:sl +
-               yday_c1:sl +
-               yday_c2:sl +
-               
-               log_sl +
-               yday_s1:log_sl +
-               yday_s2:log_sl +
-               yday_c1:log_sl +
-               yday_c2:log_sl +
-               
-               cos_ta +
-               yday_s1:cos_ta +
-               yday_s2:cos_ta +
-               yday_c1:cos_ta +
-               yday_c2:cos_ta +
+  yday_c1:canopy_scaled +
+  yday_c2:canopy_scaled +
+  yday_c3:canopy_scaled +
+  yday_c4:canopy_scaled +
+  # yday_c5:canopy_scaled +
+  # yday_c6:canopy_scaled +
+  
+               # I(canopy_scaled^2) +
+               # yday_s1:I(canopy_scaled^2) +
+               # yday_s2:I(canopy_scaled^2) +
+               # yday_c1:I(canopy_scaled^2) +
+               # yday_c2:I(canopy_scaled^2) +
+  
+  sl +
+  yday_s1:sl +
+  yday_s2:sl +
+  yday_s3:sl +
+  yday_s4:sl +
+  # yday_s5:sl +
+  # yday_s6:sl +
+  
+  yday_c1:sl +
+  yday_c2:sl +
+  yday_c3:sl +
+  yday_c4:sl +
+  # yday_c5:sl +
+  # yday_c6:sl +
+  
+  log_sl +
+  yday_s1:log_sl +
+  yday_s2:log_sl +
+  yday_s3:log_sl +
+  yday_s4:log_sl +
+  # yday_s5:log_sl +
+  # yday_s6:log_sl +
+  
+  yday_c1:log_sl +
+  yday_c2:log_sl +
+  yday_c3:log_sl +
+  yday_c4:log_sl +
+  # yday_c5:log_sl +
+  # yday_c6:log_sl +
+  
+  cos_ta +
+  yday_s1:cos_ta +
+  yday_s2:cos_ta +
+  yday_s3:cos_ta +
+  yday_s4:cos_ta +
+  # yday_s5:cos_ta +
+  # yday_s6:cos_ta +
+  
+  yday_c1:cos_ta +
+  yday_c2:cos_ta +
+  yday_c3:cos_ta +
+  yday_c4:cos_ta +
+  # yday_c5:cos_ta +
+  # yday_c6:cos_ta +
                
                strata(step_id)
 
@@ -329,9 +386,52 @@ for(i in 1:length(unique(buffalo_CLR_year$id))) {
 
 }
 
+for(i in 1:10) print(AIC(clogit_model_list[[i]]))
+
 summary(clogit_model_list[[1]])
 
 # save(clogit_model_list, file = "workspace images/clr_models_ndvi_slope_canopy_herby_2_harmonics_20230209.rds")
+
+x = seq(1,365, 1)
+
+fourier_expr <- 
+  
+  0.2 + 
+  
+  (-0.076*sin(2*pi*x/365))+
+  (0.16*sin(4*pi*x/365))+
+  (0.22*sin(6*pi*x/365))+
+  (-0.007*sin(8*pi*x/365))+
+  (0.018*sin(10*pi*x/365))+
+  (0.036*sin(12*pi*x/365))+
+  
+  (-0.014*cos(2*pi*x/365))+
+  (0.12*cos(4*pi*x/365))+
+  (0.097*cos(6*pi*x/365))+
+  (-0.05*cos(8*pi*x/365))+
+  (0.15*cos(10*pi*x/365))+
+  (-0.09*cos(12*pi*x/365))
+
+
+fourier_expr <- 
+  
+  -0.17 + 
+  
+  (0.098*sin(2*pi*x/365))+
+  (-0.079*sin(4*pi*x/365))+
+  (-0.067*sin(6*pi*x/365))+
+  (-0.057*sin(8*pi*x/365))+
+  (-0.008*sin(10*pi*x/365))+
+  (0.0067*sin(12*pi*x/365))+
+  
+  (0.015*cos(2*pi*x/365))+
+  (0.047*cos(4*pi*x/365))+
+  (-0.014*cos(6*pi*x/365))+
+  (0.010*cos(8*pi*x/365))+
+  (-0.16*cos(10*pi*x/365))+
+  (-0.001*cos(12*pi*x/365))
+
+plot(fourier_expr)
 
 ```
 

@@ -194,6 +194,8 @@ for(i in 1:length(unique_hours)) {
 
 ```
 
+Add harmonic terms multiplied by covariates (essentially creating a design matrix)
+
 ```{r}
 
 buffalo_CLR_year_harmonics <- buffalo_CLR_year %>% mutate(
