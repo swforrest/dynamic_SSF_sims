@@ -1,0 +1,1091 @@
+---
+title: "SSF CLR fitting and prediction"
+author: "Scott Forrest"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Import packages
+
+```{r message = FALSE}
+
+options(scipen=999)
+
+# install.packages("forecast")
+# install.packages("TwoStepCLogit")
+
+library(tidyverse)
+
+packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", 
+              "RColorBrewer", "patchwork", "ecospat", "ggmap", "basemaps", "mapedit", 
+              "sf", "ggpubr", "circular", "forecast", "TwoStepCLogit", "splines")
+
+walk(packages, require, character.only = T)
+
+```
+
+Using spline terms
+
+```{r}
+
+splines_df <- as.data.frame(splines::bs(buffalo_CLR_year_harmonics$yday, degree = 3))
+splines_df$yday <- buffalo_CLR_year_harmonics$yday
+
+splines_df <- as.data.frame(splines::bs(buffalo_CLR_year_harmonics$yday, degree = 3, intercept = TRUE))
+splines_df$yday <- buffalo_CLR_year_harmonics$yday
+
+splines_df <- as.data.frame(splines::ns(buffalo_CLR_year_harmonics$yday, df = 5, intercept = TRUE))
+splines_df$yday <- buffalo_CLR_year_harmonics$yday
+
+# Plotting the basis splines using ggplot2
+ggplot(splines_df, aes(yday)) +
+  geom_line(aes(y = `1`), color = "red", size = 1) +
+  geom_line(aes(y = `2`), color = "blue", size = 1) +
+  geom_line(aes(y = `3`), color = "green", size = 1) +
+  geom_line(aes(y = `4`), color = "purple", size = 1) +
+  geom_line(aes(y = `5`), color = "skyblue", size = 1) +
+  # geom_line(aes(y = `6`), color = "orange", size = 1) +
+  # geom_line(aes(y = `7`), color = "darkred", size = 1) +
+  labs(x = "Day of the year", y = "Basis") +
+  # scale_color_manual(values = c("red", "blue", "green", "purple")) +
+  theme_minimal()
+
+# mgcv::smooth.construct.tp.smooth.spec(buffalo_CLR_year_harmonics$yday)
+# smooth.construct.tp.smooth.spec(s(buffalo_CLR_year$ndvi_scaled, knots = 6), data = buffalo_CLR_year)
+
+```
+
+Fitting models with clogit
+
+```{r}
+
+for(i in 1:length(buffalo_year_ids)) {
+
+buffalo_model_data <- buffalo_CLR_year_harmonics %>% dplyr::filter(id == buffalo_year_ids[i])
+
+# y = buffalo_CLR_year_harmonics$y
+# splines_yday <- splines::bs(buffalo_model_data$yday, degree = 6, intercept = TRUE)
+splines_yday <- splines::ns(buffalo_model_data$yday, df = 7, intercept = TRUE)
+# covariates <- buffalo_CLR_year_harmonics[, c("canopy_cover", "sl", "log_sl", "cos_ta")]
+
+# buffalo_CLR_year_harmonics %>% mutate(ndvi_spline_1 = splines_yday[,1])
+
+# Fit the conditional logistic regression model with splines
+model <- clogit(y ~ 
+                  ndvi_scaled:splines_yday[,1] + 
+                  ndvi_scaled:yday_spline2 + 
+                  ndvi_scaled:yday_spline3 + 
+                  ndvi_scaled:yday_spline4 + 
+                  ndvi_scaled:yday_spline5 + 
+                  ndvi_scaled:yday_spline6 + 
+                  ndvi_scaled:yday_spline7 + 
+                  # ndvi_scaled:splines_yday[,8] + 
+                  # ndvi_scaled:splines_yday[,9] + 
+                  # ndvi_scaled:splines_yday[,10] + 
+                  # ndvi_scaled:splines_yday[,11] + 
+                  # ndvi_scaled:splines_yday[,12] + 
+                  # ndvi_scaled:splines_yday[,13] + 
+                  # ndvi_scaled:splines_yday[,14] + 
+                  # ndvi_scaled:splines_yday[,15] + 
+                  # ndvi_scaled:splines_yday[,16] + 
+                  # ndvi_scaled:splines_yday[,17] + 
+                  # ndvi_scaled:splines_yday[,18] + 
+                  # ndvi_scaled:splines_yday[,19] + 
+                  # ndvi_scaled:splines_yday[,20] + 
+                  # ndvi_scaled:splines_yday[,21] + 
+                  # ndvi_scaled:splines_yday[,22] + 
+                  # ndvi_scaled:splines_yday[,23] + 
+                  # ndvi_scaled:splines_yday[,24] + 
+                  # ndvi_scaled:splines_yday[,25] + 
+                  # ndvi_scaled:splines_yday[,26] + 
+                  # ndvi_scaled:splines_yday[,27] + 
+                  # ndvi_scaled:splines_yday[,28] + 
+                  # ndvi_scaled:splines_yday[,29] + 
+                  # ndvi_scaled:splines_yday[,30] + 
+                  # ndvi_scaled:splines_yday[,31] + 
+                  canopy_cover + 
+                  sl + 
+                  log_sl + 
+                  cos_ta + 
+                  strata(step_id), 
+                data = buffalo_model_data)
+
+model
+
+plot(x =buffalo_model_data$yday, y = splines_yday %*% model$coefficients[5:11])
+
+}
+
+```
+
+
+```{r}
+
+for(i in 1:length(buffalo_year_ids)) {
+
+buffalo_model_data <- buffalo_CLR_year_harmonics %>% dplyr::filter(id == buffalo_year_ids[i])
+
+# y = buffalo_CLR_year_harmonics$y
+# splines_yday <- splines::bs(buffalo_model_data$yday, degree = 6, intercept = TRUE)
+splines_yday <- splines::ns(buffalo_model_data$yday, df = 7, intercept = TRUE)
+# covariates <- buffalo_CLR_year_harmonics[, c("canopy_cover", "sl", "log_sl", "cos_ta")]
+
+# buffalo_CLR_year_harmonics %>% mutate(ndvi_spline_1 = splines_yday[,1])
+
+# Fit the conditional logistic regression model with splines
+model <- clogit(y ~
+  
+                  ndvi_scaled:yday_spline1 + 
+                  ndvi_scaled:yday_spline2 + 
+                  ndvi_scaled:yday_spline3 + 
+                  # ndvi_scaled:yday_spline4 + 
+                  # ndvi_scaled:yday_spline5 + 
+                  # ndvi_scaled:yday_spline6 + 
+                  # ndvi_scaled:yday_spline7 + 
+                  
+                  canopy_scaled + 
+                  canopy_scaled:yday_spline1 + 
+                  canopy_scaled:yday_spline2 + 
+                  canopy_scaled:yday_spline3 + 
+                  # canopy_cover:yday_spline4 + 
+                  # canopy_cover:yday_spline5 + 
+                  # canopy_cover:yday_spline6 + 
+                  # canopy_cover:yday_spline7 + 
+  
+                  sl + 
+                  sl:yday_spline1 + 
+                  sl:yday_spline2 + 
+                  sl:yday_spline3 + 
+                  # sl:yday_spline4 + 
+                  # sl:yday_spline5 + 
+                  # sl:yday_spline6 + 
+                  # sl:yday_spline7 + 
+  
+                  log_sl + 
+                  log_sl:yday_spline1 + 
+                  log_sl:yday_spline2 + 
+                  log_sl:yday_spline3 + 
+                  # log_sl:yday_spline4 + 
+                  # log_sl:yday_spline5 + 
+                  # log_sl:yday_spline6 + 
+                  # log_sl:yday_spline7 + 
+  
+                  cos_ta + 
+                  cos_ta:yday_spline1 + 
+                  cos_ta:yday_spline2 + 
+                  cos_ta:yday_spline3 + 
+                  # cos_ta:yday_spline4 + 
+                  # cos_ta:yday_spline5 + 
+                  # cos_ta:yday_spline6 + 
+                  # cos_ta:yday_spline7 + 
+                  
+                  strata(step_id), 
+                data = buffalo_model_data)
+
+model
+
+plot(x =buffalo_model_data$yday, y = splines_yday %*% model$coefficients[5:11])
+
+}
+
+```
+
+
+With 3 pairs of harmonics 
+
+```{r three harmonics}
+
+splines_yday <- as.data.frame(splines::ns(buffalo_CLR_year_harmonics$yday, df = 3, intercept = TRUE))
+
+names(splines_yday) <- c("yday_spline1", "yday_spline2", "yday_spline3") #, "yday_spline4", 
+                                        # "yday_spline5", "yday_spline6", "yday_spline7")
+
+buffalo_CLR_year_splines <- bind_cols(buffalo_CLR_year_harmonics, splines_yday)
+
+colnames(buffalo_CLR_year_splines)
+
+formula_twostep_splines <- y ~
+  
+                  ndvi_scaled:yday_spline1 + 
+                  ndvi_scaled:yday_spline2 + 
+                  ndvi_scaled:yday_spline3 + 
+                  # ndvi_scaled:yday_spline4 + 
+                  # ndvi_scaled:yday_spline5 + 
+                  # ndvi_scaled:yday_spline6 + 
+                  # ndvi_scaled:yday_spline7 + 
+                  
+                  canopy_scaled + 
+                  canopy_scaled:yday_spline1 + 
+                  canopy_scaled:yday_spline2 + 
+                  canopy_scaled:yday_spline3 + 
+                  # canopy_cover:yday_spline4 + 
+                  # canopy_cover:yday_spline5 + 
+                  # canopy_cover:yday_spline6 + 
+                  # canopy_cover:yday_spline7 + 
+  
+                  sl + 
+                  sl:yday_spline1 + 
+                  sl:yday_spline2 + 
+                  sl:yday_spline3 + 
+                  # sl:yday_spline4 + 
+                  # sl:yday_spline5 + 
+                  # sl:yday_spline6 + 
+                  # sl:yday_spline7 + 
+  
+                  log_sl + 
+                  log_sl:yday_spline1 + 
+                  log_sl:yday_spline2 + 
+                  log_sl:yday_spline3 + 
+                  # log_sl:yday_spline4 + 
+                  # log_sl:yday_spline5 + 
+                  # log_sl:yday_spline6 + 
+                  # log_sl:yday_spline7 + 
+  
+                  cos_ta + 
+                  cos_ta:yday_spline1 + 
+                  cos_ta:yday_spline2 + 
+                  cos_ta:yday_spline3 + 
+                  # cos_ta:yday_spline4 + 
+                  # cos_ta:yday_spline5 + 
+                  # cos_ta:yday_spline6 + 
+                  # cos_ta:yday_spline7 + 
+  
+  strata(step_id) +
+  cluster(id)
+
+```
+
+Fitting the model
+
+```{r twostep model fit}
+
+tic()
+model_splines <- Ts.estim(formula = formula_twostep_splines,
+         data = buffalo_CLR_year_splines,
+         # random = , # default = all covariates
+         all.m.1 = TRUE,
+         D = "UN(1)",
+         itermax = 10000) # default = 2000
+toc()
+
+model_splines
+
+model_n_splines_3df <- model_splines
+
+```
+
+
+
+```{r}
+
+coefs_df_function <- function(clogit_model) {
+  
+  return(data.frame("index" = 1:length(model_twostep$beta), 
+                    "coef" = names(model_twostep$beta), 
+                    "value" = as.numeric(model_twostep$beta), 
+                    "se" = as.numeric(model_twostep$se),
+                    "ind.var" = as.numeric(diag(model_twostep$D))))
+}
+
+clogit_model_coefs <- coefs_df_function(model_twostep)
+
+# store the coefficients of each model fit
+# clogit_model_coefs_2harms <- clogit_model_coefs
+clogit_model_coefs_3harms <- clogit_model_coefs
+
+# clogit_model_coefs <- clogit_model_coefs_2harms
+clogit_model_coefs <- clogit_model_coefs_3harms
+
+```
+
+Calculating the coefficient curves across the year (by yday)
+
+```{r temporal coefficients 2 harmonics}
+
+# clogit_coef_df <- clogit_model_coefs
+
+x_yday <- seq(1, 365, 1)
+
+y_yday <- function(x,
+                    lin_coef,
+                    sin_coef1,
+                    sin_coef2,
+                    cos_coef1,
+                    cos_coef2) {
+
+  lin_coef +
+    (sin_coef1 * sin(2 * pi * x / 365)) +
+    (sin_coef2 * sin(4 * pi * x / 365)) +
+    (cos_coef1 * cos(2 * pi * x / 365)) +
+    (cos_coef2 * cos(4 * pi * x / 365))
+}
+
+
+
+harmonic_coefs_function <- function(clogit_coef_df) {
+
+y_ndvi <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c2")])
+
+y_ndvi_quad <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c2")])
+
+y_canopy <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c2")])
+
+y_canopy_quad <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c2")])
+
+y_sl <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c2")])
+
+y_log_sl <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c2")])
+
+y_cos_ta <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c2")])
+
+return(data.frame("yday" = x_yday,
+                  "NDVI" = y_ndvi, 
+                  "NDVI_quadratic" = y_ndvi_quad, 
+                  "Canopy_cover" = y_canopy, 
+                  "Canopy_cover_quadratic" = y_canopy_quad, 
+                  "Step_length" = y_sl,
+                  "log_Step_length" = y_log_sl, 
+                  "cos_Turning_angle" = y_cos_ta))
+
+}
+
+
+# clogit_model_coefs$value[which(clogit_model_coefs$coef == "cos_ta:yday_s1")]
+
+# running the function
+harmonic_coefs_df <- harmonic_coefs_function(clogit_model_coefs)
+
+# harmonic_coefs_df_2harms <- harmonic_coefs_df
+
+```
+
+For the 3 harmonic model
+
+```{r temporal coefficients 3 harmonics}
+
+# clogit_coef_df <- clogit_model_coefs
+
+x_yday <- seq(1, 365, 1)
+
+y_yday <- function(x,
+                    lin_coef,
+                    sin_coef1,
+                    sin_coef2,
+                    sin_coef3,
+                    cos_coef1,
+                    cos_coef2,
+                    cos_coef3) {
+
+  lin_coef +
+    (sin_coef1 * sin(2 * pi * x / 365)) +
+    (sin_coef2 * sin(4 * pi * x / 365)) +
+    (sin_coef3 * sin(6 * pi * x / 365)) +
+    (cos_coef1 * cos(2 * pi * x / 365)) +
+    (cos_coef2 * cos(4 * pi * x / 365)) +
+    (cos_coef3 * cos(6 * pi * x / 365))
+}
+
+
+
+harmonic_coefs_function <- function(clogit_coef_df) {
+
+y_ndvi <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c3")])
+
+y_ndvi_quad <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c3")])
+
+y_canopy <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c3")])
+
+y_canopy_quad <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c3")])
+
+y_sl <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c3")])
+
+y_log_sl <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c3")])
+
+y_cos_ta <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c3")])
+
+return(data.frame("yday" = x_yday,
+                  "NDVI" = y_ndvi, 
+                  "NDVI_quadratic" = y_ndvi_quad, 
+                  "Canopy_cover" = y_canopy, 
+                  "Canopy_cover_quadratic" = y_canopy_quad, 
+                  "Step_length" = y_sl,
+                  "log_Step_length" = y_log_sl, 
+                  "cos_Turning_angle" = y_cos_ta))
+
+}
+
+
+# clogit_model_coefs$value[which(clogit_model_coefs$coef == "cos_ta:yday_s1")]
+
+# running the function
+harmonic_coefs_df <- harmonic_coefs_function(clogit_model_coefs)
+
+harmonic_coefs_df_3harms <- harmonic_coefs_df
+
+```
+
+
+Reconstructing the Gamma and von Mises distributions from the tentative distributions (from Fieberg et al 2021: Appendix C)
+
+```{r}
+
+# for individuals
+# movement_parameters <- read_csv("outputs/buffalo_parametric_indv_movement_params_20230208.csv")
+# movement_parameters_year <- movement_parameters %>% filter(id %in% buffalo_year_ids)
+
+# for the population
+# gamma$params$shape # 0.438167
+# gamma$params$scale # 534.3507
+# vonmises$params$kappa # 0.1848126
+
+tentative_shape <- 0.438167
+tentative_scale <- 534.3507
+tentative_kappa <- 0.1848126
+
+harmonic_coefs_df <- harmonic_coefs_df %>% mutate(shape = tentative_shape + log_Step_length,
+                             scale = 1/((1/tentative_scale) - Step_length),
+                             kappa = tentative_kappa + cos_Turning_angle)
+
+# write_csv(harmonic_coefs_df, "outputs/harmonic_coefs_df_with_movement_params_ndvi_canopy_quads_20230519.csv")
+
+# turning into a long data frame
+harmonic_coefs <- pivot_longer(harmonic_coefs_df, cols = !1, names_to = "coef")
+
+# write_csv(harmonic_coefs, "outputs/harmonic_coefs_df_long_with_movement_params_ndvi_canopy_quads_20230519.csv")
+
+```
+
+
+```{r}
+
+x <- seq(0,500,1)
+
+# step length distribution
+plot(x, dgamma(x, 
+       shape = harmonic_coefs %>% filter(yday == 1) %>% 
+         dplyr::filter(coef == "shape") %>% dplyr::pull(value),
+       scale = harmonic_coefs %>% filter(yday == 1) %>% 
+         dplyr::filter(coef == "scale") %>% dplyr::pull(value)),
+     type = "l",
+     main = "Step length distribution",
+     xlab = "Distance (m)",
+     ylab = "Density")
+
+xvm <- seq(-pi, pi, 0.01)
+
+plot(xvm, dvonmises(xvm, 
+          mu = 0, 
+          kappa = harmonic_coefs %>% filter(yday == 1) %>% 
+            dplyr::filter(coef == "kappa") %>% dplyr::pull(value),
+          log = FALSE),
+     type = "l",
+     main = "Turning angle distribution",
+     xlab = "Turning angle (rad)",
+     ylab = "Density",
+     ylim = c(0,0.21))
+
+
+```
+
+
+
+```{r}
+
+n <- 1e5
+
+shape <- harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% dplyr::filter(coef == "shape") %>% dplyr::pull(value)
+scale <- harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% dplyr::filter(coef == "scale") %>% dplyr::pull(value)
+kappa <- harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% dplyr::filter(coef == "kappa") %>% dplyr::pull(value)
+
+sl <- rgamma(n, shape = shape, scale = scale)
+hist(sl, breaks = 100)
+ta <- as.numeric(Rfast::rvonmises(n, m = pi, k = 0.78) - pi)
+hist(ta, breaks = 100)
+
+x_s <- sl * sin(ta)
+y_s <- sl * cos(ta)
+xy_mk <- data.frame("x_pos" = x_s, "y_pos" = y_s)
+
+ggplot(data = xy_mk, aes(x = x_pos, y = y_pos)) +
+  geom_point(alpha = 0.1) +
+  # geom_density_2d_filled(data = xy_mk, aes(x = x_pos, y = y_pos)) +
+  # geom_hex(bins = 30) +
+  # geom_bin_2d(bins = 50) +
+  scale_x_continuous("x position") +
+  scale_y_continuous("y position") +
+  # scale_fill_viridis_c() +
+  geom_point(aes(x = 0, y = 0), colour = "red", alpha = 0.25) +
+  coord_equal() +
+  theme_bw()
+
+```
+
+
+
+```{r}
+
+coefs <- unique(harmonic_coefs$coef)
+# coef_titles <- c("NDVI", "Slope", "Herbaceous vegetation", "Canopy cover", "Step length", "log(Step length)", "cos(Turning angle)")
+
+for(i in 1:length(coefs)) {
+  
+  i = 1
+  
+  gg <- ggplot() +
+  # geom_line(data = harmonic_coefs %>% 
+  #             filter(coef %in% unique(harmonic_coefs$coef)), # %>% # [1:4]
+  #             # filter(coef == coefs[i]), 
+  #           aes(x = yday, y = value, group = id), colour = "grey") + # , colour = factor(id)
+    geom_line(data = harmonic_coefs %>% 
+                filter(coef == coefs[i]), aes(x = yday, y = value, colour = factor(coef))) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    scale_y_continuous(expression(Time-varying~parameter~values~beta)) +
+    scale_x_continuous() + # breaks = seq(0,)
+    scale_color_discrete("Estimate") +
+    ggtitle(coefs[i]) +
+    theme_classic() +
+    theme(legend.position = "bottom")
+  
+  print(gg)
+
+  # ggsave(paste("outputs/plots/clr_fitting/clr_harmonic_20230208_", coef_titles[i], ".png", sep = ""),
+  # width=150, height=90, units="mm", dpi = 300)
+  
+}
+
+
+# with just the means 
+
+ggplot() +
+    geom_path(data = harmonic_coefs %>% 
+                # filter(id %in% unique(harmonic_coefs$id)[11]) %>% 
+                filter(coef %in% unique(harmonic_coefs$coef)[1:7]), 
+              aes(x = yday, y = value, colour = coef)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    scale_y_continuous(expression(Time-varying~parameter~values~beta)) +
+    scale_x_continuous("Day of the year") +
+    scale_color_discrete("Estimate") +
+    # ggtitle(coef_titles[i]) +
+    theme_classic() +
+    theme(legend.position = "bottom")
+
+ggsave(paste("outputs/plots/clr_fitting/clr_3harmonics_all_quads_20230519.png", sep = ""),
+  width=150, height=90, units="mm", dpi = 300)
+# ggsave(paste("outputs/plots/clr_fitting/clr_harmonic_all_pres_20230208.png", sep = ""),
+#   width=300, height=180, units="mm", dpi = 300)
+
+
+ggplot() +
+    geom_path(data = harmonic_coefs %>% 
+                filter(id %in% unique(harmonic_coefs$id)[11]) %>% 
+                filter(coef %in% unique(harmonic_coefs$coef)[8:10]), 
+              aes(x = month, y = value, colour = coef)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    scale_y_continuous(expression(beta)) +
+    scale_x_continuous(breaks = 0:12) +
+    scale_color_discrete("Estimate") +
+    # ggtitle(coef_titles[i]) +
+    theme_classic() +
+    theme(legend.position = "bottom")
+
+
+ggplot() +
+    geom_path(data = harmonic_coefs %>% 
+                filter(id %in% unique(harmonic_coefs$id)[11]) %>% 
+                filter(coef %in% unique(harmonic_coefs$coef)[c(8,10)]), 
+              aes(x = month, y = value, colour = coef)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    scale_y_continuous(expression(beta)) +
+    scale_x_continuous(breaks = 0:12) +
+    scale_color_discrete("Estimate") +
+    # ggtitle(coef_titles[i]) +
+    theme_classic() +
+    theme(legend.position = "bottom")
+
+harmonic_coefs %>% filter(id %in% unique(harmonic_coefs$id)[11])
+
+```
+
+
+
+
+```{r}
+
+x <- seq(0, 1000, length = 500)
+dgamma(x, shape = tentative_shape, scale = tentative_scale)
+
+temporal_movement_params <- harmonic_coefs_df %>% filter(id == "Weighted mean") %>% dplyr::select(c("month", "shape", "scale", "kappa"))
+# write_csv(temporal_movement_params, "outputs/temporal_movement_params_CLR_20230210.csv")
+
+ggplot() +
+  stat_function(fun = dgamma, args = list(shape = tentative_shape, scale = tentative_scale)) +
+  scale_x_continuous(limits = c(0,1000), breaks = seq(0,1000,100)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_classic()
+
+
+subset <- temporal_movement_params %>% filter(month < 1)
+
+ggplot(subset) +
+  stat_function(fun = dgamma, args = list(shape = shape, scale = scale)) +
+  scale_x_continuous(limits = c(0,1000), breaks = seq(0,1000,100)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_classic()
+
+```
+
+
+# Generating predictions
+
+Importing habitat layers
+
+```{r}
+
+ndvi_projected <- rast("mapping/cropped rasters/ndvi_GEE_projected_watermask20230207.tif")
+
+# scaling from the buffalo data
+scaling_mean <- as.numeric(attributes(buffalo_CLR_year$ndvi_scaled)[1]) # 0.3125089
+scaling_sd <- as.numeric(attributes(buffalo_CLR_year$ndvi_scaled)[2]) # 0.143179 for July 2018
+
+ndvi_stack_scaled <- (ndvi_projected - scaling_mean) / scaling_sd
+# plot(ndvi_stack_scaled)
+# time_vector <- terra::time(ndvi_projected)
+# terra::time(ndvi_stack_scaled) <- NULL
+# terra::time(ndvi_stack_scaled) <- lubridate::date(as.POSIXlt(as.POSIXlt("1970/01/01 00:00:00") + time_vector))
+
+# ndvi_above0_stack_scaled <- rast("mapping/cropped rasters/ndvi_above0_stack_scaled_20230210.tif")
+
+```
+
+For plotting with terra 
+
+```{r}
+
+# elev <- rast("mapping/cropped rasters/DEM_H_raster.tif")
+slope <- rast("mapping/cropped rasters/slope_raster.tif")
+veg_herby <- rast("mapping/cropped rasters/veg_herby.tif")
+canopy_cover <- rast("mapping/cropped rasters/canopy_cover.tif")
+# 
+# ndvi_july2018 <- ndvi_projected[[7]]
+# 
+# names(slope) <- "Slope"
+# names(veg_herby) <- "Herbaceous vegetation"
+# names(canopy_cover) <- "Canopy cover"
+# names(ndvi_july2018) <- "NDVI July 2018"
+# 
+# # plot(elev)
+# plot(slope)
+# plot(veg_herby)
+# plot(canopy_cover)
+# plot(ndvi_july2018)
+# 
+# plot_stack <- c(ndvi_july2018, slope, veg_herby, canopy_cover)
+# 
+# png(filename = "outputs/plots/ndvi_slope_herb_canopy_layers_20230208.png",
+#     width = 300, height = 175, units = "mm", res = 300)
+# plot(plot_stack)
+# dev.off()
+
+```
+
+Scaled rasters
+
+```{r}
+
+# hist(buffalo_CLR_year$slope_scaled)
+# slope_scaled <- (slope - attr(buffalo_CLR_year$slope_scaled, "scaled:center")) / attr(buffalo_CLR_year$slope_scaled, "scaled:scale")
+# plot(slope_scaled)
+# 
+# writeRaster(slope_scaled, "mapping/cropped rasters/slope_scaled_by_buffalo_data_20230210.tif")
+slope_scaled <- rast("mapping/cropped rasters/slope_scaled_by_buffalo_data_20230210.tif")
+
+# hist(buffalo_CLR_year$canopy_scaled)
+# canopy_scaled <- ((canopy_cover / 100) - attr(buffalo_CLR_year$canopy_scaled, "scaled:center")) / attr(buffalo_CLR_year$canopy_scaled, "scaled:scale")
+# plot(canopy_scaled)
+# 
+# writeRaster(canopy_scaled, "mapping/cropped rasters/canopy_scaled_by_buffalo_data_20230210.tif")
+canopy_scaled <- rast("mapping/cropped rasters/canopy_scaled_by_buffalo_data_20230210.tif")
+
+```
+
+
+Checking distributions of covariates vs used and random locations
+
+```{r}
+
+ndvi_values_month1 <- values(ndvi_above0_stack_scaled[[13]])
+canopy_values <- values(canopy_cover)
+# slope_values <- values(slope_scaled)
+# herby_values <- values(veg_herby)
+
+enviro_values <- data.frame("Data" = rep("Environmental", length(values(canopy_cover))), "pres" = rep(1, length(values(canopy_cover))),  "ndvi" = ndvi_values_month1, "canopy" = canopy_values, "slope" = slope_values, "herby" = herby_values)
+names(enviro_values) <- c("Data", "pres", "ndvi", "canopy", "slope", "herby")
+
+buffalo_pres_values <- buffalo_CLR_year %>% filter(y == 1 & year == 2019 & month == 3) %>%  transmute(Data = "Presence", pres = y, ndvi = ndvi_temporal, canopy = canopy_cover, slope = slope_end, herby = veg_herby)
+
+buffalo_background_values <- buffalo_CLR_year %>% filter(y == 0 & year == 2019 & month == 3) %>%  transmute(Data = "Random steps", pres = y, ndvi = ndvi_temporal, canopy = canopy_cover, slope = slope_end, herby = veg_herby)
+
+enviro_buffalo_values <- rbind(enviro_values, buffalo_pres_values, buffalo_background_values)
+
+# ggplot(enviro_buffalo_values) +
+#   geom_density(aes(x = ndvi, fill = method), alpha = 0.5) +
+#   geom_density(data = buffalo_CLR_year %>% filter(y == 1, year == 2019 & month == 1), 
+#                aes(x = ndvi_temporal), fill = "orange", alpha = 0.5) +
+#   geom_density(data = buffalo_CLR_year %>% filter(y == 0, year == 2019 & month == 1), 
+#                aes(x = ndvi_temporal), linetype = "dashed", colour = "red", alpha = 0.5) +
+#   theme_classic()
+
+ggplot() +
+  geom_density(data = enviro_buffalo_values, aes(x = ndvi, fill = Data), alpha = 0.25) +
+  theme_classic()
+
+ggplot() +
+  geom_density(data = enviro_buffalo_values, aes(x = slope, fill = Data), alpha = 0.25) +
+  theme_classic()
+
+
+tab <- as.data.frame(prop.table(table(enviro_buffalo_values$canopy, enviro_buffalo_values$Data), 2))
+names(tab) <- c("Canopy_cover", "Data", "Freq")
+
+ggplot(data = tab, aes(x = Canopy_cover, y = Freq, fill = Data)) +
+  geom_bar(stat = "identity", position = position_dodge(), alpha = 0.75) +
+  theme_classic()
+
+```
+
+
+```{r temporal naive}
+
+years <- c(rep(2019, 7), rep(2018, 5))
+months <- c(seq(1, 7, 1), seq(8, 12, 1))
+day <- rep(1, 12)
+dates <- make_datetime(year = years, month = months, day = day, tz = "Australia/Queensland")
+
+# temp_coefs <- data.frame("date" = dates, 
+#                          "ndvi" = harmonic_weighted_mean$NDVI[seq(1, 111, 10)], 
+#                          "slope" = harmonic_weighted_mean$Slope[seq(1, 111, 10)], 
+#                          "veg_herby" = harmonic_weighted_mean$Herbaceous_vegetation[seq(1, 111, 10)], 
+#                          "canopy" = harmonic_weighted_mean$Canopy_cover[seq(1, 111, 10)])
+
+monthly_coefs <- data.frame("date" = dates,
+                         "ndvi" = harmonic_coefs_df$NDVI[seq(1, 331, 30)],
+                         "ndvi_quad" = harmonic_coefs_df$NDVI_quadratic[seq(1, 331, 30)],
+                         "canopy" = harmonic_coefs_df$Canopy_cover[seq(1, 331, 30)],
+                         "canopy_quad" = harmonic_coefs_df$Canopy_cover_quadratic[seq(1, 331, 30)],
+                         "shape" = harmonic_coefs_df$shape[seq(1, 331, 30)],
+                         "scale" = harmonic_coefs_df$scale[seq(1, 331, 30)],
+                         "kappa" = harmonic_coefs_df$kappa[seq(1, 331, 30)])
+
+# write_csv(monthly_coefs, "outputs/weighted_mean_monthly_CLR_coefs_wide_yday_with_movement_params_20230424.csv") # weighted mean
+
+monthly_coefs_long <- monthly_coefs %>% pivot_longer(cols = !date)
+
+# sanity check to ensure that the coefficients line up to the correct months
+monthly_coefs_long %>% filter(!name %in% c("shape", "scale", "kappa")) %>% 
+  ggplot(aes(x = month(date), y = value, colour = factor(name))) +
+  geom_line() +
+  scale_colour_viridis_d("Covariate") +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_x_continuous(breaks = 1:12) +
+  theme_classic()
+
+```
+
+# Predictions and cross-validation
+
+Boyce index function
+
+```{r}
+
+ecospat.boyce2 <- function (fit, obs, nclass = 0, window.w = "default", res = 100, 
+  PEplot = TRUE, rm.duplicate = TRUE, method = "spearman") 
+{
+  boycei <- function(interval, obs, fit) {
+    pi <- sum(as.numeric(obs >= interval[1] & obs <= interval[2]))/length(obs)
+    ei <- sum(as.numeric(fit >= interval[1] & fit <= interval[2]))/length(fit)
+    return(round(pi/ei, 10))
+  }
+  if (inherits(fit, "RasterLayer")) {
+    if (is.data.frame(obs) || is.matrix(obs)) {
+      obs <- raster::extract(fit, obs)
+    }
+    fit <- getValues(fit)
+    fit <- fit[!is.na(fit)]
+    obs <- obs[!is.na(obs)]
+  }
+  mini <- min(fit, obs)
+  maxi <- max(fit, obs)
+  if (length(nclass) == 1) {
+    if (nclass == 0) {
+      if (window.w == "default") {
+        window.w <- (max(fit) - min(fit))/10
+      }
+      vec.mov <- seq(from = mini, to = maxi - window.w, 
+        by = (maxi - mini - window.w)/res)
+      vec.mov[res + 1] <- vec.mov[res + 1] + 1
+      interval <- cbind(vec.mov, vec.mov + window.w)
+    }
+    else {
+      vec.mov <- seq(from = mini, to = maxi, by = (maxi - 
+        mini)/nclass)
+      interval <- cbind(vec.mov, c(vec.mov[-1], maxi))
+    }
+  }
+  else {
+    vec.mov <- c(mini, sort(nclass[!nclass > maxi | nclass < 
+      mini]))
+    interval <- cbind(vec.mov, c(vec.mov[-1], maxi))
+  }
+  f <- apply(interval, 1, boycei, obs, fit)
+  to.keep <- which(f != "NaN")
+  f <- f[to.keep]
+  if (length(f) < 2) {
+    b <- NA
+  }
+  else {
+    r <- 1:length(f)
+    if (rm.duplicate == TRUE) {
+      r <- c(1:length(f))[f != c(f[-1], TRUE)]
+    }
+    b <- cor(f[r], vec.mov[to.keep][r], method = method)
+  }
+  HS <- apply(interval, 1, sum)/2
+  if (length(nclass) == 1 & nclass == 0) {
+    HS[length(HS)] <- HS[length(HS)] - 1
+  }
+  HS <- HS[to.keep]
+  if (PEplot == TRUE) {
+    plot(HS, f, xlab = "Habitat suitability", ylab = "Predicted/Expected ratio", 
+      col = "grey", cex = 0.75)
+    points(HS[r], f[r], pch = 19, cex = 0.75)
+  }
+  return(list(F.ratio = f, cor = round(b, 3), HS = HS))
+}
+
+```
+
+
+
+
+```{r}
+
+boyce_naive_list <- vector(mode = "list", length = 12)
+naive_pred_stack <- c()
+
+for(i in 1:12) {
+
+resources <- c(ndvi_stack_scaled[[which(time(ndvi_stack_scaled) == monthly_coefs$date[i])]], 
+               # slope_scaled,
+               # veg_herby, 
+               canopy_scaled)
+
+# ndvi
+ndvi_lin <- resources[[1]]
+ndvi_lin <- ndvi_lin * monthly_coefs$ndvi[[i]]
+# plot(ndvi_lin)
+
+ndvi_quad <- resources[[1]]
+ndvi_quad <- (ndvi_quad ^ 2) * monthly_coefs$ndvi_quad[[i]] 
+# plot(ndvi_quad)
+
+ndvi_pred <- ndvi_lin + ndvi_quad
+# plot(ndvi_pred)
+
+# canopy cover 
+canopy_lin <- resources[[2]]
+canopy_lin <- canopy_lin * monthly_coefs$canopy[[i]]
+# plot(canopy_lin)
+
+canopy_quad <- resources[[2]]
+canopy_quad <- (canopy_quad ^ 2) * monthly_coefs$canopy_quad[[i]] 
+# plot(canopy_quad)
+
+canopy_pred <- canopy_lin + canopy_quad
+# plot(canopy_pred)
+
+# combining
+naive_pred <- exp(ndvi_pred + canopy_pred) / global(exp(ndvi_pred + canopy_pred), fun = "sum", na.rm = TRUE)[[1]]
+plot(naive_pred)
+plot(naive_pred)
+points(as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(x1) %>% unlist()), 
+       as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(y1) %>% unlist()))
+
+naive_pred_stack <- c(naive_pred_stack, naive_pred)
+
+
+# setting up the buffalo observation data for the relevant month
+
+# buffalo_obs <- buffalo_CLR_year %>% 
+#   filter(y == 1 & month == 1 & x1 > xmin & x1 < xmax & y1 > ymin & y1 < ymax) %>% 
+#   transmute(x = x1 - xmin, y = y1 - ymin)
+
+buffalo_obs <- buffalo_CLR_year %>% filter(y == 1 & month == i) %>% 
+  transmute(x = x1, y = y1)
+
+naive_raster <- raster(naive_pred)
+# naive_raster <- raster(naive_pred_cropped)
+
+# plot(naive_pred)
+# plot(naive_raster)
+
+# plot(naive_cropped_raster[[1]])
+
+# boyce_naive <- ecospat.boyce2(naive_cropped_raster[[1]], buffalo_obs,
+#                               # method = "spearman"
+#                               method = "pearson",
+#                               # method = "kendall"
+#                               )
+
+boyce_naive_list[[i]] <- ecospat.boyce2(naive_raster, buffalo_obs,
+                              method = "spearman"
+                              # method = "pearson",
+                              # method = "kendall"
+                              )
+
+boyce_naive_list[[i]]
+
+}
+
+# naive_raster_2harms <- naive_raster
+# boyce_naive_list_2harms <- boyce_naive_list
+
+naive_raster_3harms <- naive_raster
+boyce_naive_list_3harms <- boyce_naive_list
+
+```
+
+
+```{r}
+
+for(i in 1:12) {
+  plot(naive_pred_stack[[i]])
+}
+
+for(i in 1:12) {
+  # plot(naive_pred_stack[[i]])
+  plot(naive_pred_stack[[i]])
+  points(as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(x1) %>% unlist()), 
+       as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(y1) %>% unlist()))
+}
+
+```
+
+
+```{r}
+
+spearman_cor <- c()
+
+for(i in 1:12) {
+  print(boyce_naive_list[[i]]$cor)
+  spearman_cor[i] <- boyce_naive_list[[i]]$cor
+}
+
+mean(spearman_cor)
+sd(spearman_cor)
+
+```
