@@ -64,14 +64,16 @@ buffalo_CLR <- buffalo_data %>%
          elev_delta_scaled = scale(elev_delta),
          elev_log_scaled = scale(elev_log),
          slope_scaled = scale(slope_end),
-         month_s1 = sin(2*pi*month/12),
-         month_s2 = sin(4*pi*month/12),
-         month_s3 = sin(6*pi*month/12),
-         month_s4 = sin(8*pi*month/12),
-         month_c1 = cos(2*pi*month/12),
-         month_c2 = cos(4*pi*month/12),
-         month_c3 = cos(6*pi*month/12),
-         month_c4 = cos(8*pi*month/12),
+         
+         # month_s1 = sin(2*pi*month/12),
+         # month_s2 = sin(4*pi*month/12),
+         # month_s3 = sin(6*pi*month/12),
+         # month_s4 = sin(8*pi*month/12),
+         # month_c1 = cos(2*pi*month/12),
+         # month_c2 = cos(4*pi*month/12),
+         # month_c3 = cos(6*pi*month/12),
+         # month_c4 = cos(8*pi*month/12),
+         
          yday_s1 = sin(2*pi*yday/365),
          yday_s2 = sin(4*pi*yday/365),
          yday_s3 = sin(6*pi*yday/365),
@@ -79,7 +81,17 @@ buffalo_CLR <- buffalo_data %>%
          yday_c1 = cos(2*pi*yday/365),
          yday_c2 = cos(4*pi*yday/365),
          yday_c3 = cos(6*pi*yday/365),
-         yday_c4 = cos(8*pi*yday/365)) %>%
+         yday_c4 = cos(8*pi*yday/365),
+         
+         hour_s1 = sin(2*pi*hour/24),
+         hour_s2 = sin(4*pi*hour/24),
+         hour_s3 = sin(6*pi*hour/24),
+         hour_s4 = sin(8*pi*hour/24),
+         hour_c1 = cos(2*pi*hour/24),
+         hour_c2 = cos(4*pi*hour/24),
+         hour_c3 = cos(6*pi*hour/24),
+         hour_c4 = cos(8*pi*hour/24)) %>%
+  
   drop_na(c(ndvi_temporal, veg_herby, canopy_01, sl_)) %>% 
   dplyr::select(!(burst_:case_))
 
@@ -281,3 +293,21 @@ buffalo_CLR_year_harmonics <- buffalo_CLR_year %>% mutate(
 
 ```
 
+Movement parameters from random sampling
+
+```{r}
+
+# gamma <- fit_distr(buffalo_all_steps_by_burst$sl_, "gamma")$params$shape
+# vonmises <- fit_distr(buffalo_all_steps_by_burst$ta_, "vonmises")
+
+# population
+# gamma$params$shape # 0.438167
+# gamma$params$scale # 534.3507
+# vonmises$params$kappa # 0.1848126
+# vonmises$params$mu # 0
+
+movement_parameters <- read_csv("outputs/buffalo_parametric_indv_movement_params_20230208.csv")
+
+movement_parameters_year <- movement_parameters %>% filter(id %in% buffalo_year_ids)
+
+```
