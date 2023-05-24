@@ -27,9 +27,10 @@ Import buffalo telemetry data.
 # using the population estimate as the TENTATIVE distribution will make it easier to estimate the weighted mean estimate of the movement kernel
 buffalo_data <- read_csv(file = "outputs/buffalo_parametric_popn_covs_20230208.csv")
 
-buffalo_data$t1_ %>% mutate(t1 = )
+buffalo_data <- buffalo_data %>% mutate(t1_ = lubridate::with_tz(buffalo_data$t1_, tzone = "Australia/Darwin"),
+                                        t2_ = lubridate::with_tz(buffalo_data$t2_, tzone = "Australia/Darwin"))
 
-lubridate::with_tz(buffalo_data$t1_, tzone = "AEST")
+# lubridate::with_tz(buffalo_data$t1_, tzone = "Australia/Darwin")
 
 # data filtered to be individuals with at least 1 year of data, truncated to cover just a single year, and with most of the covariates already added (besides the scaled covariates)
 # buffalo_data <- read_csv(file = "outputs/buffalo_1year_aligned_steps_parametric_popn_covs_20230427.csv")
@@ -46,6 +47,7 @@ buffalo_CLR <- buffalo_data %>%
          y1 = y1_, y2 = y2_, 
          t1 = t1_, 
          t1_rounded = round_date(buffalo_data$t1_, "hour"), 
+         t2_rounded = round_date(buffalo_data$t2_, "hour"), 
          t2 = t2_, 
          yday = yday(t1_),
          sl = sl_, sl_scaled = scale(sl),
@@ -54,7 +56,8 @@ buffalo_CLR <- buffalo_data %>%
          year = year(t1_), 
          month = month(t1_), 
          # month_factor = factor(month(t1_)),
-         hour = hour(t1_),
+         # hour = hour(t1_),
+         hour = hour(t2_rounded),
          # hour_factor = factor(hour),
          # day = day(t1_),
          # day_factor = factor(day(t1_)),

@@ -33,7 +33,7 @@ walk(packages, require, character.only = T)
 
 With 2 pairs of harmonics 
 
-```{r two step formula}
+```{r two harmonics}
 
 # auto.arima()
 
@@ -150,6 +150,125 @@ formula_twostep <- y ~
 ```
 
 
+With 3 pairs of harmonics 
+
+```{r three harmonics}
+
+# auto.arima()
+
+formula_twostep <- y ~ 
+  
+  ndvi_scaled +
+  yday_s1:ndvi_scaled +
+  yday_s2:ndvi_scaled +
+  yday_s3:ndvi_scaled +
+  # yday_s4:ndvi_scaled +
+  # yday_s5:ndvi_scaled +
+  # yday_s6:ndvi_scaled +
+  
+  yday_c1:ndvi_scaled +
+  yday_c2:ndvi_scaled +
+  yday_c3:ndvi_scaled +
+  # yday_c4:ndvi_scaled +
+  # yday_c5:ndvi_scaled +
+  # yday_c6:ndvi_scaled +
+  
+  ndvi_2 +
+  yday_s1:ndvi_2 +
+  yday_s2:ndvi_2 +
+  yday_s3:ndvi_2 +
+  # yday_s4:ndvi_2 +
+  # yday_s5:ndvi_2 +
+  # yday_s6:ndvi_2 +
+  
+  yday_c1:ndvi_2 +
+  yday_c2:ndvi_2 +
+  yday_c3:ndvi_2 +
+  # yday_c4:ndvi_2 +
+  # yday_c5:ndvi_2 +
+  # yday_c6:ndvi_2 +
+
+  canopy_scaled +
+  yday_s1:canopy_scaled +
+  yday_s2:canopy_scaled +
+  yday_s3:canopy_scaled +
+  # yday_s4:canopy_scaled +
+  # yday_s5:canopy_scaled +
+  # yday_s6:canopy_scaled +
+  
+  yday_c1:canopy_scaled +
+  yday_c2:canopy_scaled +
+  yday_c3:canopy_scaled +
+  # yday_c4:canopy_scaled +
+  # yday_c5:canopy_scaled +
+  # yday_c6:canopy_scaled +
+  
+  canopy_2 +
+  yday_s1:canopy_2 +
+  yday_s2:canopy_2 +
+  yday_s3:canopy_2 +
+  # yday_s4:canopy_2 +
+  # yday_s5:canopy_2 +
+  # yday_s6:canopy_2 +
+  
+  yday_c1:canopy_2 +
+  yday_c2:canopy_2 +
+  yday_c3:canopy_2 +
+  # yday_c4:canopy_2 +
+  # yday_c5:canopy_2 +
+  # yday_c6:canopy_2 +
+  
+  sl +
+  yday_s1:sl +
+  yday_s2:sl +
+  yday_s3:sl +
+  # yday_s4:sl +
+  # yday_s5:sl +
+  # yday_s6:sl +
+  
+  yday_c1:sl +
+  yday_c2:sl +
+  yday_c3:sl +
+  # yday_c4:sl +
+  # yday_c5:sl +
+  # yday_c6:sl +
+  
+  log_sl +
+  yday_s1:log_sl +
+  yday_s2:log_sl +
+  yday_s3:log_sl +
+  # yday_s4:log_sl +
+  # yday_s5:log_sl +
+  # yday_s6:log_sl +
+  
+  yday_c1:log_sl +
+  yday_c2:log_sl +
+  yday_c3:log_sl +
+  # yday_c4:log_sl +
+  # yday_c5:log_sl +
+  # yday_c6:log_sl +
+  
+  cos_ta +
+  yday_s1:cos_ta +
+  yday_s2:cos_ta +
+  yday_s3:cos_ta +
+  # yday_s4:cos_ta +
+  # yday_s5:cos_ta +
+  # yday_s6:cos_ta +
+  
+  yday_c1:cos_ta +
+  yday_c2:cos_ta +
+  yday_c3:cos_ta +
+  # yday_c4:cos_ta +
+  # yday_c5:cos_ta +
+  # yday_c6:cos_ta +
+  
+  strata(step_id) +
+  cluster(id)
+
+```
+
+
 ```{r}
 
 # formula_twostep <- y ~ 
@@ -194,6 +313,8 @@ Fitting the model
 
 ```{r twostep model fit}
 
+
+
 tic()
 model_twostep <- Ts.estim(formula = formula_twostep,
          data = buffalo_CLR_year_harmonics,
@@ -203,6 +324,9 @@ model_twostep <- Ts.estim(formula = formula_twostep,
          itermax = 10000) # default = 2000
 toc()
 
+# model_twostep_2harms <- model_twostep
+model_twostep <- model_twostep_3harms
+
 ```
 
 
@@ -211,8 +335,8 @@ Summary of model fit
 ```{r two step summary}
 
 model_twostep
-summary(model_twostep)
-print(model_twostep)
+# summary(model_twostep)
+# print(model_twostep)
 
 ```
 
@@ -221,17 +345,11 @@ print(model_twostep)
 
 ```{r}
 
-# coefs_df <- data.frame("index" = 1:length(clogit_model_list[[1]]$model$coefficients), 
-#                        "coef" = names(clogit_model_list[[1]]$model$coefficients), 
-#                        "value" = clogit_model_list[[1]]$model$coefficients)
-
-1:length(model_twostep$beta)
-names(model_twostep$beta)
-as.numeric(model_twostep$beta)
-as.numeric(model_twostep$se)
-as.numeric(diag(model_twostep$D))
-
-
+# 1:length(model_twostep$beta)
+# names(model_twostep$beta)
+# as.numeric(model_twostep$beta)
+# as.numeric(model_twostep$se)
+# as.numeric(diag(model_twostep$D))
 
 coefs_df_function <- function(clogit_model) {
   
@@ -244,25 +362,18 @@ coefs_df_function <- function(clogit_model) {
 
 clogit_model_coefs <- coefs_df_function(model_twostep)
 
+# store the coefficients of each model fit
+# clogit_model_coefs_2harms <- clogit_model_coefs
+clogit_model_coefs_3harms <- clogit_model_coefs
 
-
-# clogit_coefs %>% filter(coef == "ndvi_temporal")
-clogit_coefs %>% filter(coef == "ndvi_scaled")
-clogit_coefs %>% filter(coef == "I(ndvi_scaled^2)")
-clogit_coefs %>% filter(coef == "canopy_scaled")
-clogit_coefs %>% filter(coef == "I(canopy_scaled^2)")
-# clogit_coefs %>% filter(coef == "slope_scaled")
-
-# mean(x = ndvi_lin_df$coefs)
-# weighted.mean(x = ndvi_lin_df$coefs, w = ndvi_lin_df$weights)
-# 
-# pivot_longer(clogit_coefs, cols = coef, names_to = c("coef", "se"))
+# clogit_model_coefs <- clogit_model_coefs_2harms
+clogit_model_coefs <- clogit_model_coefs_3harms
 
 ```
 
 Calculating the coefficient curves across the year (by yday)
 
-```{r}
+```{r temporal coefficients 2 harmonics}
 
 # clogit_coef_df <- clogit_model_coefs
 
@@ -358,6 +469,129 @@ return(data.frame("yday" = x_yday,
 
 # running the function
 harmonic_coefs_df <- harmonic_coefs_function(clogit_model_coefs)
+
+# harmonic_coefs_df_2harms <- harmonic_coefs_df
+
+```
+
+For the 3 harmonic model
+
+```{r temporal coefficients 3 harmonics}
+
+# clogit_coef_df <- clogit_model_coefs
+
+x_yday <- seq(1, 365, 1)
+
+y_yday <- function(x,
+                    lin_coef,
+                    sin_coef1,
+                    sin_coef2,
+                    sin_coef3,
+                    cos_coef1,
+                    cos_coef2,
+                    cos_coef3) {
+
+  lin_coef +
+    (sin_coef1 * sin(2 * pi * x / 365)) +
+    (sin_coef2 * sin(4 * pi * x / 365)) +
+    (sin_coef3 * sin(6 * pi * x / 365)) +
+    (cos_coef1 * cos(2 * pi * x / 365)) +
+    (cos_coef2 * cos(4 * pi * x / 365)) +
+    (cos_coef3 * cos(6 * pi * x / 365))
+}
+
+
+
+harmonic_coefs_function <- function(clogit_coef_df) {
+
+y_ndvi <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c3")])
+
+y_ndvi_quad <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c3")])
+
+y_canopy <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c3")])
+
+y_canopy_quad <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c3")])
+
+y_sl <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c3")])
+
+y_log_sl <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c3")])
+
+y_cos_ta <- map_dbl(x_yday,
+             y_yday,
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s3")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c1")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c2")],
+             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c3")])
+
+return(data.frame("yday" = x_yday,
+                  "NDVI" = y_ndvi, 
+                  "NDVI_quadratic" = y_ndvi_quad, 
+                  "Canopy_cover" = y_canopy, 
+                  "Canopy_cover_quadratic" = y_canopy_quad, 
+                  "Step_length" = y_sl,
+                  "log_Step_length" = y_log_sl, 
+                  "cos_Turning_angle" = y_cos_ta))
+
+}
+
+
+# clogit_model_coefs$value[which(clogit_model_coefs$coef == "cos_ta:yday_s1")]
+
+# running the function
+harmonic_coefs_df <- harmonic_coefs_function(clogit_model_coefs)
+
+harmonic_coefs_df_3harms <- harmonic_coefs_df
 
 ```
 
@@ -506,8 +740,8 @@ ggplot() +
     theme_classic() +
     theme(legend.position = "bottom")
 
-# ggsave(paste("outputs/plots/clr_fitting/clr_harmonic_all_20230208.png", sep = ""),
-#   width=150, height=90, units="mm", dpi = 300)
+ggsave(paste("outputs/plots/clr_fitting/clr_3harmonics_all_quads_20230519.png", sep = ""),
+  width=150, height=90, units="mm", dpi = 300)
 # ggsave(paste("outputs/plots/clr_fitting/clr_harmonic_all_pres_20230208.png", sep = ""),
 #   width=300, height=180, units="mm", dpi = 300)
 
@@ -882,6 +1116,12 @@ boyce_naive_list[[i]] <- ecospat.boyce2(naive_raster, buffalo_obs,
 boyce_naive_list[[i]]
 
 }
+
+# naive_raster_2harms <- naive_raster
+# boyce_naive_list_2harms <- boyce_naive_list
+
+naive_raster_3harms <- naive_raster
+boyce_naive_list_3harms <- boyce_naive_list
 
 ```
 
