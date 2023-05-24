@@ -27,6 +27,10 @@ Import buffalo telemetry data.
 # using the population estimate as the TENTATIVE distribution will make it easier to estimate the weighted mean estimate of the movement kernel
 buffalo_data <- read_csv(file = "outputs/buffalo_parametric_popn_covs_20230208.csv")
 
+buffalo_data$t1_ %>% mutate(t1 = )
+
+lubridate::with_tz(buffalo_data$t1_, tzone = "AEST")
+
 # data filtered to be individuals with at least 1 year of data, truncated to cover just a single year, and with most of the covariates already added (besides the scaled covariates)
 # buffalo_data <- read_csv(file = "outputs/buffalo_1year_aligned_steps_parametric_popn_covs_20230427.csv")
 
@@ -159,15 +163,18 @@ Aligning step ids
 #   
 #   dplyr::select(!(burst_:case_))
 
-rounded_hours <- unique(round_date(buffalo_CLR_year$t1, "hour"))
-rounded_hours <- rounded_hours[order(rounded_hours)]
-unique_hours <- 1:length(unique(round_date(buffalo_CLR_year$t1, "hour")))
-hourly_steps <- data.frame(unique_hours, rounded_hours)
 
-buffalo_CLR_year$step_aligned <- 0
-for(i in 1:length(unique_hours)) {
-  buffalo_CLR_year$step_aligned[which(buffalo_CLR_year$t1_rounded == hourly_steps$rounded_hours[i])] <- hourly_steps$unique_hours[i]
-}
+
+# rounded_hours <- unique(round_date(buffalo_CLR_year$t1, "hour"))
+# rounded_hours <- rounded_hours[order(rounded_hours)]
+# unique_hours <- 1:length(unique(round_date(buffalo_CLR_year$t1, "hour")))
+# hourly_steps <- data.frame(unique_hours, rounded_hours)
+# 
+# buffalo_CLR_year$step_aligned <- 0
+# for(i in 1:length(unique_hours)) {
+#   buffalo_CLR_year$step_aligned[which(buffalo_CLR_year$t1_rounded == hourly_steps$rounded_hours[i])] <- hourly_steps$unique_hours[i]
+# }
+
 
 
 # buffalo_CLR_year %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
@@ -210,82 +217,86 @@ Add harmonic terms multiplied by covariates (essentially creating a design matri
 
 ```{r}
 
-buffalo_CLR_year_harmonics <- buffalo_CLR_year %>% mutate(
+buffalo_CLR_year_harmonics <- buffalo_CLR_year %>% 
   
-                            ndvi_s1 = ndvi_scaled[,1] * yday_s1,
-                            ndvi_s2 = ndvi_scaled[,1] * yday_s2,
-                            ndvi_s3 = ndvi_scaled[,1] * yday_s3,
-                            ndvi_s4 = ndvi_scaled[,1] * yday_s4,
-                            ndvi_c1 = ndvi_scaled[,1] * yday_c1,
-                            ndvi_c2 = ndvi_scaled[,1] * yday_c2,
-                            ndvi_c3 = ndvi_scaled[,1] * yday_c3,
-                            ndvi_c4 = ndvi_scaled[,1] * yday_c4,
+  mutate(
+    
+    ndvi_2 = ndvi_scaled[,1]^2,
+    canopy_2 = canopy_scaled[,1]^2
+
+                            # ndvi_s1 = ndvi_scaled[,1] * yday_s1,
+                            # ndvi_s2 = ndvi_scaled[,1] * yday_s2,
+                            # ndvi_s3 = ndvi_scaled[,1] * yday_s3,
+                            # ndvi_s4 = ndvi_scaled[,1] * yday_s4,
+                            # ndvi_c1 = ndvi_scaled[,1] * yday_c1,
+                            # ndvi_c2 = ndvi_scaled[,1] * yday_c2,
+                            # ndvi_c3 = ndvi_scaled[,1] * yday_c3,
+                            # ndvi_c4 = ndvi_scaled[,1] * yday_c4,
+
                             
-                            ndvi_2 = ndvi_scaled[,1]^2,
-                            ndvi_2_s1 = ndvi_2 * yday_s1,
-                            ndvi_2_s2 = ndvi_2 * yday_s2,
-                            ndvi_2_s3 = ndvi_2 * yday_s3,
-                            ndvi_2_s4 = ndvi_2 * yday_s4,
-                            ndvi_2_c1 = ndvi_2 * yday_c1,
-                            ndvi_2_c2 = ndvi_2 * yday_c2,
-                            ndvi_2_c3 = ndvi_2 * yday_c3,
-                            ndvi_2_c4 = ndvi_2 * yday_c4,
-                            
-                            canopy_s1 = canopy_scaled[,1] * yday_s1,
-                            canopy_s2 = canopy_scaled[,1] * yday_s2,
-                            canopy_s3 = canopy_scaled[,1] * yday_s3,
-                            canopy_s4 = canopy_scaled[,1] * yday_s4,
-                            canopy_c1 = canopy_scaled[,1] * yday_c1,
-                            canopy_c2 = canopy_scaled[,1] * yday_c2,
-                            canopy_c3 = canopy_scaled[,1] * yday_c3,
-                            canopy_c4 = canopy_scaled[,1] * yday_c4,
-                            
-                            canopy_2 = canopy_scaled[,1]^2,
-                            canopy_2_s1 = canopy_2 * yday_s1,
-                            canopy_2_s2 = canopy_2 * yday_s2,
-                            canopy_2_s3 = canopy_2 * yday_s3,
-                            canopy_2_s4 = canopy_2 * yday_s4,
-                            canopy_2_c1 = canopy_2 * yday_c1,
-                            canopy_2_c2 = canopy_2 * yday_c2,
-                            canopy_2_c3 = canopy_2 * yday_c3,
-                            canopy_2_c4 = canopy_2 * yday_c4,
-                            
-                            sl_s1 = sl * yday_s1,
-                            sl_s2 = sl * yday_s2,
-                            sl_s3 = sl * yday_s3,
-                            sl_s4 = sl * yday_s4,
-                            sl_c1 = sl * yday_c1,
-                            sl_c2 = sl * yday_c2,
-                            sl_c3 = sl * yday_c3,
-                            sl_c4 = sl * yday_c4,
-                            
-                            sl_scaled_s1 = sl_scaled * yday_s1,
-                            sl_scaled_s2 = sl_scaled * yday_s2,
-                            sl_scaled_s3 = sl_scaled * yday_s3,
-                            sl_scaled_s4 = sl_scaled * yday_s4,
-                            sl_scaled_c1 = sl_scaled * yday_c1,
-                            sl_scaled_c2 = sl_scaled * yday_c2,
-                            sl_scaled_c3 = sl_scaled * yday_c3,
-                            sl_scaled_c4 = sl_scaled * yday_c4,
-                            
-                            log_sl_s1 = log_sl * yday_s1,
-                            log_sl_s2 = log_sl * yday_s2,
-                            log_sl_s3 = log_sl * yday_s3,
-                            log_sl_s4 = log_sl * yday_s4,
-                            log_sl_c1 = log_sl * yday_c1,
-                            log_sl_c2 = log_sl * yday_c2,
-                            log_sl_c3 = log_sl * yday_c3,
-                            log_sl_c4 = log_sl * yday_c4,
-                            
-                            cos_ta_s1 = cos_ta * yday_s1,
-                            cos_ta_s2 = cos_ta * yday_s2,
-                            cos_ta_s3 = cos_ta * yday_s3,
-                            cos_ta_s4 = cos_ta * yday_s4,
-                            cos_ta_c1 = cos_ta * yday_c1,
-                            cos_ta_c2 = cos_ta * yday_c2,
-                            cos_ta_c3 = cos_ta * yday_c3,
-                            cos_ta_c4 = cos_ta * yday_c4
-                            
+                            # ndvi_2_s1 = ndvi_2 * yday_s1,
+                            # ndvi_2_s2 = ndvi_2 * yday_s2,
+                            # ndvi_2_s3 = ndvi_2 * yday_s3,
+                            # ndvi_2_s4 = ndvi_2 * yday_s4,
+                            # ndvi_2_c1 = ndvi_2 * yday_c1,
+                            # ndvi_2_c2 = ndvi_2 * yday_c2,
+                            # ndvi_2_c3 = ndvi_2 * yday_c3,
+                            # ndvi_2_c4 = ndvi_2 * yday_c4,
+
+                            # canopy_s1 = canopy_scaled[,1] * yday_s1,
+                            # canopy_s2 = canopy_scaled[,1] * yday_s2,
+                            # canopy_s3 = canopy_scaled[,1] * yday_s3,
+                            # canopy_s4 = canopy_scaled[,1] * yday_s4,
+                            # canopy_c1 = canopy_scaled[,1] * yday_c1,
+                            # canopy_c2 = canopy_scaled[,1] * yday_c2,
+                            # canopy_c3 = canopy_scaled[,1] * yday_c3,
+                            # canopy_c4 = canopy_scaled[,1] * yday_c4,
+
+                            # canopy_2_s1 = canopy_2 * yday_s1,
+                            # canopy_2_s2 = canopy_2 * yday_s2,
+                            # canopy_2_s3 = canopy_2 * yday_s3,
+                            # canopy_2_s4 = canopy_2 * yday_s4,
+                            # canopy_2_c1 = canopy_2 * yday_c1,
+                            # canopy_2_c2 = canopy_2 * yday_c2,
+                            # canopy_2_c3 = canopy_2 * yday_c3,
+                            # canopy_2_c4 = canopy_2 * yday_c4,
+                            # 
+                            # sl_s1 = sl * yday_s1,
+                            # sl_s2 = sl * yday_s2,
+                            # sl_s3 = sl * yday_s3,
+                            # sl_s4 = sl * yday_s4,
+                            # sl_c1 = sl * yday_c1,
+                            # sl_c2 = sl * yday_c2,
+                            # sl_c3 = sl * yday_c3,
+                            # sl_c4 = sl * yday_c4,
+                            # 
+                            # sl_scaled_s1 = sl_scaled * yday_s1,
+                            # sl_scaled_s2 = sl_scaled * yday_s2,
+                            # sl_scaled_s3 = sl_scaled * yday_s3,
+                            # sl_scaled_s4 = sl_scaled * yday_s4,
+                            # sl_scaled_c1 = sl_scaled * yday_c1,
+                            # sl_scaled_c2 = sl_scaled * yday_c2,
+                            # sl_scaled_c3 = sl_scaled * yday_c3,
+                            # sl_scaled_c4 = sl_scaled * yday_c4,
+                            # 
+                            # log_sl_s1 = log_sl * yday_s1,
+                            # log_sl_s2 = log_sl * yday_s2,
+                            # log_sl_s3 = log_sl * yday_s3,
+                            # log_sl_s4 = log_sl * yday_s4,
+                            # log_sl_c1 = log_sl * yday_c1,
+                            # log_sl_c2 = log_sl * yday_c2,
+                            # log_sl_c3 = log_sl * yday_c3,
+                            # log_sl_c4 = log_sl * yday_c4,
+                            # 
+                            # cos_ta_s1 = cos_ta * yday_s1,
+                            # cos_ta_s2 = cos_ta * yday_s2,
+                            # cos_ta_s3 = cos_ta * yday_s3,
+                            # cos_ta_s4 = cos_ta * yday_s4,
+                            # cos_ta_c1 = cos_ta * yday_c1,
+                            # cos_ta_c2 = cos_ta * yday_c2,
+                            # cos_ta_c3 = cos_ta * yday_c3,
+                            # cos_ta_c4 = cos_ta * yday_c4
+
                             )
 
 # plot(buffalo_CLR_year$yday, buffalo_CLR_year$ndvi_s1)
