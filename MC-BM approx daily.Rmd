@@ -1,0 +1,226 @@
+---
+title: "MC-BM approx daily"
+author: "Scott Forrest"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Using Monte Carlo integration to approximate the redistribution kernel for the Barnett-Moorcroft approximation
+
+Setting up the parameters
+
+```{r}
+
+# hourly_coefs_2harms_quads <- read_csv("outputs/daily_harmonic_coefs_df_with_movement_params_ndvi_canopy_herby_quads_20230524.csv")
+hourly_coefs_2harms_quads <- read_csv("outputs/daily_2harmonic_coefs_df_ndvi_canopy_herby_quads_wet_20230524.csv")
+
+hourly_coefs <- hourly_coefs_2harms_quads
+
+```
+
+
+
+```{r}
+
+naive_ud <- terra::rast("mapping/naive_pred_stack_daily_2harms_ndvi2_canopy2_herby_wet_20230524.tif")
+plot(naive_ud)
+# y_ext <- terra::ext(resources[[1]])[4] - terra::ext(resources[[1]])[3]
+# terra::ext(resources) <- c(0, 60000, 0, 57000)
+
+# smaller 100 x 100 extent
+xmin <- 30000
+xmax <- 32500
+ymin <- -1436000
+ymax <- -1433500
+
+# smaller 100 x 100 extent
+xmin <- 30000
+xmax <- 32500
+ymin <- -1436000
+ymax <- -1433500
+
+# larger extent
+xmin <- 17500
+xmax <- 40000
+ymin <- -1445000
+ymax <- -1427500
+
+crop_extent <- ext(xmin, xmax, ymin, ymax)
+
+naive_ud_cropped <- terra::crop(naive_ud, crop_extent)
+ext(naive_ud_cropped) <- c(xmin - xmin, 
+                            xmax - xmin, 
+                            ymin - ymin, 
+                            ymax - ymin)
+
+# naive_ud_cropped_50m <- terra::aggregate(naive_ud_cropped)
+# plot(naive_ud_cropped_50m[[1]])
+
+plot(naive_ud_cropped[[1]])
+i = 1
+points(as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+                    dplyr::select(x1) %>% unlist()), 
+       as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+                    dplyr::select(y1) %>% unlist()))
+
+for(i in 1:24){
+plot(naive_ud_cropped[[i]])
+points(as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+                    dplyr::select(x1) %>% unlist()), 
+       as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+                    dplyr::select(y1) %>% unlist()))
+}
+
+```
+
+
+
+```{r}
+
+n_proposals <- 100
+grid_res <- terra::res(naive_ud_cropped)[1]
+
+ud_norm_list <- vector(mode = "list", length = 24)
+ud_norm_list[[1]] <- naive_ud_cropped[[1]] # initialise the first UD to start with
+
+for(i in 1:25) {
+  
+  # i = 1
+
+# von mises isn't considered as the turning angle is assumed to be uniform
+# ta <- as.numeric(Rfast::rvonmises(n_proposals, m = pi, k = monthly_coefs$kappa[month_n]) - pi) 
+# ta <- runif(n_proposals, min = -pi, max = pi)
+# sl <- rgamma(n_proposals, shape = hourly_coefs$shape[1], scale = hourly_coefs$scale[1])
+
+# hist(ta, breaks = 50)
+# hist(sl, breaks = 50)
+rows <- terra::nrow(naive_ud_cropped)
+cols <- terra::ncol(naive_ud_cropped)
+
+#######
+
+ud_updated <- matrix(NA, nrow = rows, ncol = cols)
+
+for(x_current in 1:box_width) {
+  for(y_current in 1:box_height) {
+    
+    # x_current <- 1
+    # y_current <- 2
+    
+    ta <- runif(n_proposals, min = -pi, max = pi)
+    sl <- rgamma(n_proposals, shape = hourly_coefs$shape[1], scale = hourly_coefs$scale[1])
+    
+    matrix_row = rows - y_current + 1
+    matrix_col = x_current
+    
+    x_proposal <- ((-(grid_res/2) + x_current * grid_res) + sl * sin(ta)) %% ext(naive_ud_cropped[[1]])[2] 
+    y_proposal <- ((-(grid_res/2) + y_current * grid_res) + sl * cos(ta)) %% ext(naive_ud_cropped[[1]])[4]
+    
+    ud_updated[matrix_row, matrix_col] <- as.numeric(terra::extract(ud_norm_list[[i]], 
+                                                                cbind((-(grid_res/2) + y_current * grid_res), 
+                                                                      (-(grid_res/2) + x_current * grid_res)))) * 
+      mean(terra::extract(naive_ud_cropped[[i]], 
+                          cbind(x_proposal, y_proposal))[,1], na.rm = TRUE)
+
+  }
+}
+
+#######
+
+ud_norm_list[[i]] <- ud_updated/sum(ud_updated)  # normalise the UD
+# image(ud_updated)
+# plot(naive_ud_cropped[[1]])
+plot(terra::rast(ud_norm_list[[i]]))
+# plot(terra::rast(ud_norm2))
+
+}
+
+terra::writeRaster(terra::rast(ud_norm_list), "mapping/MC-BM_approx_preds_20230524.tif")
+save.image("MC-BM_approx_preds_20230524.RData")
+
+```
+
+
+
+```{r}
+
+
+plot(x_proposal, y_proposal)
+
+layer
+
+layer[(x_val-1)*box_height+y_val]
+
+x_pos <- (x[i - 1] + sl[steps == i] * sin(ta[steps == i])) %% ext(resc)[2] 
+y_pos <- (y[i - 1] + sl[steps == i] * cos(ta[steps == i])) %% ext(resc)[4]
+
+ p <- terra::extract(resources[[1]], cbind(x_proposal, y_proposal))[,1]
+ 
+
+
+```
+
+
+```{r}
+
+# Get landscape as a matrix
+layer<-as.matrix(read.table('random_field_100.inp',sep='\t',header=FALSE))
+
+# Grab the beta coefficient for the landscape layer
+# beta<-as.numeric(ssf1sim$coefficients[1])
+beta<-2
+
+# lambda<-(1/sl)-as.numeric(ssf1sim$coefficients[2])
+lambda<-10
+
+box_width = 100
+box_height = 100
+
+# Calculate y-values at each point in layer
+y_vals<-rep(1:box_width,box_height)     
+
+# Calculate x-values at each point in layer
+x_vals<-c()
+for(count in 1:box_height)
+{
+  x_vals<-c(x_vals,rep(count,box_width))  
+}
+
+# Calculate the predicted UD using the Barnett-Moorcroft method
+ud<-c()
+
+for(x_val in 1:box_height)
+{
+  for(y_val in 1:box_width)
+  {
+    
+    # x_val = 1
+    # y_val = 1
+    
+    # Value of the UD at this point, prior to normalising
+    ud<-c(ud,exp(beta*layer[(x_val-1)*box_height+y_val])*sum(exp(-lambda*sqrt((x_vals-x_val)^2+(y_vals-y_val)^2))*exp(beta*layer)))
+  }
+}
+ud<-ud/sum(ud)  # normalise the UD
+
+# Plot the UD as a raster
+library(raster)
+xy<-cbind(x_vals,y_vals)
+ras<-raster(ncols=box_width, nrows=box_height,xmn=0,xmx=box_width,ymn=0,ymx=box_height)
+rud<-rasterize(xy,ras,ud)
+plot(rud)
+
+```
+
+
+
