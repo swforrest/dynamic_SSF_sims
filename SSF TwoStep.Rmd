@@ -91,13 +91,27 @@ formula_twostep <- y ~
   # yday_s4:canopy_2 +
   # yday_s5:canopy_2 +
   # yday_s6:canopy_2 +
-  
   yday_c1:canopy_2 +
   yday_c2:canopy_2 +
   # yday_c3:canopy_2 +
   # yday_c4:canopy_2 +
   # yday_c5:canopy_2 +
   # yday_c6:canopy_2 +
+  
+  herby_scaled +
+  yday_s1:herby_scaled +
+  yday_s2:herby_scaled +
+  # yday_s3:herby_scaled +
+  # yday_s4:herby_scaled +
+  # yday_s5:herby_scaled +
+  # yday_s6:herby_scaled +
+  
+  yday_c1:herby_scaled +
+  yday_c2:herby_scaled +
+  # yday_c3:herby_scaled +
+  # yday_c4:herby_scaled +
+  # yday_c5:herby_scaled +
+  # yday_c6:herby_scaled +
   
   sl +
   yday_s1:sl +
@@ -268,52 +282,9 @@ formula_twostep <- y ~
 
 ```
 
-
-```{r}
-
-# formula_twostep <- y ~ 
-#   
-#   poly(ndvi_scaled, degree = 2, raw = TRUE) +
-#   poly(ndvi_s1, degree = 2, raw = TRUE) +
-#   poly(ndvi_s2, degree = 2, raw = TRUE) +
-#   poly(ndvi_c1, degree = 2, raw = TRUE) +
-#   poly(ndvi_c2, degree = 2, raw = TRUE) +
-#   
-#   poly(canopy_scaled, degree = 2, raw = TRUE) +
-#   poly(canopy_s1, degree = 2, raw = TRUE) +
-#   poly(canopy_s2, degree = 2, raw = TRUE) +
-#   poly(canopy_c1, degree = 2, raw = TRUE) +
-#   poly(canopy_c2, degree = 2, raw = TRUE) +
-#   
-#   sl +
-#   sl_s1 +
-#   sl_s2 +
-#   sl_c1 +
-#   sl_c2 +
-#   
-#   log_sl +
-#   log_sl_s1 +
-#   log_sl_s2 +
-#   log_sl_c1 +
-#   log_sl_c2 +
-#   
-#   cos_ta +
-#   cos_ta_s1 +
-#   cos_ta_s2 +
-#   cos_ta_c1 +
-#   cos_ta_c2 +
-#   
-#   strata(step_id) +
-#   cluster(id)
-
-```
-
-
 Fitting the model
 
 ```{r twostep model fit}
-
-
 
 tic()
 model_twostep <- Ts.estim(formula = formula_twostep,
@@ -324,11 +295,10 @@ model_twostep <- Ts.estim(formula = formula_twostep,
          itermax = 10000) # default = 2000
 toc()
 
-# model_twostep_2harms <- model_twostep
-model_twostep <- model_twostep_3harms
+model_twostep_2harms <- model_twostep
+# model_twostep <- model_twostep_3harms
 
 ```
-
 
 Summary of model fit
 
@@ -341,6 +311,61 @@ model_twostep
 ```
 
 
+Reconstructing coefficients with two harmonics with quadratics
+
+```{r}
+
+yday <- seq(0,365,1)
+# hour <- seq(1,24,1)
+
+yday_harmonics_df <- data.frame("yday_s1" = sin(2*pi*yday/365),
+                                "yday_s2" = sin(4*pi*yday/365),
+                                # "hour_s3" = sin(6*pi*hour/24),
+                                # "hour_s4" = sin(8*pi*hour/24),
+                                "yday_c1" = cos(2*pi*yday/365),
+                                "yday_c2" = cos(4*pi*yday/365))
+                                # "hour_c3" = cos(6*pi*hour/24),
+                                # "hour_c4" = cos(8*pi*hour/24))
+
+# plot(x = hour, y = yday_harmonics_df$hour_s1, type = "l")
+
+coef_names <- names(model_twostep$beta)[1:8] # only get linear terms
+
+harmonic_coefs_list <- vector(mode = "list", length = length(coef_names))
+
+for(i in 1:length(coef_names)) {
+harmonic_coefs_list[[i]] <- c(model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i]))],
+                              model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i], ":yday_s1"))],
+                               model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i], ":yday_s2"))],
+                               model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i], ":yday_s3"))],
+                               model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i], ":yday_c1"))],
+                               model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i], ":yday_c2"))],
+                               model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i], ":yday_c3"))])
+}
+
+
+for(i in 1:length(coef_names)) {
+plot(x = yday, 
+     y = (harmonic_coefs_list[[i]][1] + 
+            as.matrix(yday_harmonics_df) %*% 
+            harmonic_coefs_list[[i]][2:5]), # change for 3 harmonics
+     main = paste0(coef_names[i]),
+     ylab = "Temporally varying coefficient",
+     type = "l")
+}
+
+
+hourly_coefs_2harms_quads <- data.frame("hour" = yday,
+                                  "ndvi" = (harmonic_coefs_list[[1]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[1]][2:5]),
+                                  "ndvi_quad" = (harmonic_coefs_list[[2]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[2]][2:5]),
+                                  "canopy" = (harmonic_coefs_list[[3]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[3]][2:5]),
+                                  "canopy_quad" = (harmonic_coefs_list[[4]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[4]][2:5]),
+                                  "herby" = (harmonic_coefs_list[[5]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[5]][2:5]),
+                                  "sl" = (harmonic_coefs_list[[6]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[6]][2:5]),
+                                  "log_sl" = (harmonic_coefs_list[[7]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[7]][2:5]),
+                                  "cos_ta" = (harmonic_coefs_list[[8]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[8]][2:5]))
+
+```
 
 
 ```{r}
