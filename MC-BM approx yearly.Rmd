@@ -1,0 +1,425 @@
+---
+title: "MC-BM approx daily"
+author: "Scott Forrest"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+# Considering daily rhythmic behaviour in telemetry data improves buffalo management strategy
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Using Monte Carlo integration to approximate the redistribution kernel for the Barnett-Moorcroft approximation
+
+Setting up the parameters
+
+```{r}
+
+# install.packages("pryr")
+# devtools::install_github("hadley/lineprof")
+
+library(terra)
+library(tictoc)
+library(pryr)
+library(lineprof)
+
+monthly_coefs <- read_csv("outputs/monthly_coefs_wide_yday_with_movement_params_20230530.csv") 
+monthly_coefs
+
+```
+
+
+
+```{r}
+
+# unnormalised
+naive_ud <- terra::rast("mapping/naive_pred_stack_unnorm_yearly_2harms_ndvi2_canopy2_herby_wet_20230530.tif")
+# global(naive_ud[[i]], fun = "sum", na.rm = TRUE)
+names(naive_ud) <- paste0("naive", 1:12)
+# plot(naive_ud)
+
+# smaller 100 x 100 extent
+# xmin <- 30000
+# xmax <- 32500
+# ymin <- -1436000
+# ymax <- -1433500
+
+# 200 x 200 extent
+# xmin <- 27500
+# xmax <- 32500
+# ymin <- -1438500
+# ymax <- -1433500
+# 
+# larger extent
+# xmin <- 17500
+# xmax <- 40000
+# ymin <- -1445000
+# ymax <- -1427500
+
+# for no cropping
+xmin <- ext(naive_ud)[1]
+xmax <- ext(naive_ud)[2]
+ymin <- ext(naive_ud)[3]
+ymax <- ext(naive_ud)[4]
+
+# crop_extent <- ext(xmin, xmax, ymin, ymax)
+
+naive_ud_cropped <- terra::crop(naive_ud, crop_extent)
+ext(naive_ud_cropped) <- c(xmin - xmin, 
+                            xmax - xmin, 
+                            ymin - ymin, 
+                            ymax - ymin)
+
+# naive_ud_cropped_50m <- terra::aggregate(naive_ud_cropped)
+# plot(naive_ud_cropped_50m[[1]])
+
+# global(naive_ud_cropped[[i]], fun = "sum", na.rm = TRUE)
+
+plot(naive_ud_cropped[[month_no]])
+points(as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month == month_no) %>% 
+                    dplyr::select(x1) %>% unlist()) - xmin, 
+       as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month == month_no) %>% 
+                    dplyr::select(y1) %>% unlist()) - ymin)
+
+# for(i in 1:24){
+# plot(naive_ud_cropped[[i]])
+# points(as.numeric(buffalo_CLR_year %>% 
+#                     filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+#                     dplyr::select(x1) %>% unlist()) - xmin, 
+#        as.numeric(buffalo_CLR_year %>% 
+#                     filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+#                     dplyr::select(y1) %>% unlist()) - ymin)
+# }
+
+```
+
+
+```{r}
+
+# naive_ud_cropped <- naive_ud
+
+# naive_ud_cropped_df_list <- vector(mode = "list", length = 24)
+# for(i in 1:24) naive_ud_cropped_df_list[[i]] <- as.data.frame(naive_ud_cropped[[i]], xy = TRUE)
+
+# naive_ud_cropped_df <- as.data.frame(naive_ud_cropped, xy = TRUE)
+# 
+# min(naive_ud_cropped_df[,3:14], na.rm = TRUE) # 0.000007599509
+# max(naive_ud_cropped_df[,3:14], na.rm = TRUE) # 1.225601
+
+
+# for(i in 1:12) {
+#   
+# plot <- ggplot() +
+#   geom_raster(data = naive_ud_cropped_df, aes(x = x, y = y, fill = naive_ud_cropped_df[, i + 2])) +
+#   geom_point(data = buffalo_CLR_year_harmonics %>% 
+#                filter(y == 1 & month == i), 
+#              aes(x = x1, y = y1), colour = "red", size = 0.5) +
+#   coord_equal() +
+#   scale_x_continuous(limits = c(xmin, xmax )) + # - xmin
+#   scale_y_continuous(limits = c(ymin, ymax )) + # - ymin
+#   scale_fill_viridis_c("Habitat suitability", option = "D", direction = 1) +
+#   # , limits = c(0.00000001185235, 0.0000006519935)
+#   # scale_fill_distiller("Habitat suitability", palette = "Reds", direction = 1) +
+#   ggtitle(paste0("Hour ", i)) +
+#   theme_classic() +
+#   theme(legend.position = "right")
+# 
+# print(plot)
+# 
+# # ggsave(paste0("outputs/plots/hourly_preds/hourly_preds_", i, "_20230525.png"), width=150, height=90, units="mm", dpi = 300)
+# 
+# }
+
+```
+
+Using a for loop
+
+```{r}
+
+ud_template <- as.data.frame(naive_ud_cropped[[1]], xy = TRUE, na.rm = FALSE)
+ud_template$naive_preds <- NULL
+nrow(ud_template)
+
+object_size(ud_template)
+
+n_proposals <- 100
+grid_res <- terra::res(naive_ud_cropped)[1]
+rows <- terra::nrow(naive_ud_cropped)
+cols <- terra::ncol(naive_ud_cropped)
+xmax <- ext(naive_ud_cropped[[1]])[2] 
+ymax <- ext(naive_ud_cropped[[1]])[4]
+
+# ud_norm_list <- vector(mode = "list", length = 25)
+# ud_norm_list[[1]] <- naive_ud_cropped[[1]] # initialise the first UD to start with
+
+tic()
+for(month_no in 1:12) {
+  
+  month_no = 1
+
+# von mises isn't considered as the turning angle is assumed to be uniform
+# ta <- as.numeric(Rfast::rvonmises(n_proposals, m = pi, k = monthly_coefs$kappa[month_n]) - pi) 
+# ta <- runif(n_proposals, min = -pi, max = pi)
+# sl <- rgamma(n_proposals, shape = hourly_coefs$shape[1], scale = hourly_coefs$scale[1])
+
+# hist(ta, breaks = 50)
+# hist(sl, breaks = 50)
+
+#######
+  
+ud_updated <- matrix(NA, nrow = rows, ncol = cols)
+
+tic()
+for(x_current in 1:cols) {
+  for(y_current in 1:rows) {
+    
+    # x_current <- 500
+    # y_current <- 500
+    
+    # tic()
+    ta <- runif(n_proposals, min = -pi, max = pi)
+    sl <- rgamma(n_proposals, shape = monthly_coefs$shape[month_no], scale = monthly_coefs$scale[month_no])
+    # toc()
+    # hist(ta, breaks = 50)
+    # hist(sl, breaks = 50)
+    
+    # tic()
+    matrix_row = rows - y_current + 1
+    matrix_col = x_current
+    # toc()
+    
+    # tic()
+    x_proposal <- ((-(grid_res/2) + x_current * grid_res) + sl * sin(ta)) %% xmax
+    y_proposal <- ((-(grid_res/2) + y_current * grid_res) + sl * cos(ta)) %% ymax
+    # toc()
+    
+    # tic()
+    ud_updated[matrix_row, matrix_col] <-
+    # ud_updated[x_current, y_current] <-
+      
+      # as.numeric(terra::extract(ud_norm_list[[i]],
+      #                           cbind((-(grid_res/2) + y_current * grid_res),
+      #                                 (-(grid_res/2) + x_current * grid_res)))) *
+      
+      mean(terra::extract(naive_ud_cropped[[month_no]],
+                          cbind(x_proposal, y_proposal))[,1], na.rm = TRUE)
+    # toc()
+    
+  }
+}
+toc()
+
+#######
+
+# exp(beta * Z(x))
+# ud_norm_list[[i]] 
+# global(ud_norm_list[[i]], fun = "sum")
+
+# ud_template$value <- NULL
+# ud_template_mat <- ud_template
+
+# exp(beta * Z(z)) * psi(.) dz
+# ud_updated/sum(ud_updated) # only makes 100 x 100 raster with resolution of 1
+# ud_template$value <- as.vector(ud_updated/sum(ud_updated, na.rm = TRUE))
+# ud_template$value <- as.vector(ud_updated)
+# plot(terra::rast(ud_template))
+# plot(terra::rev(rast(ud_template)))
+# points(x_proposal, y_proposal)
+# max(ud_template$value, na.rm = TRUE)
+
+Beta_Z_z <- terra::setValues(naive_ud_cropped[[i]], ud_updated)
+plot(naive_ud_cropped[[i]])
+plot(Beta_Z_z)
+
+# exp(beta * Z(x)) * exp(beta * Z(z)) * psi(.) dz
+u_x_unnorm <- naive_ud_cropped[[i]] * Beta_Z_z
+plot(u_x_unnorm)
+u_x <- u_x_unnorm / as.numeric(terra::global(u_x_unnorm, fun = "sum", na.rm = TRUE))
+plot(u_x)
+
+
+ud_norm_list[[i + 1]] <- u_x
+
+# ud_norm_list[[i + 1]] <- terra::rast(ud_updated/sum(ud_updated))  # normalise the UD and convert to a raster
+# image(ud_updated)
+# plot(naive_ud_cropped[[1]])
+plot(ud_norm_list[[i + 1]])
+# plot(terra::rast(ud_norm2))
+points(as.numeric(buffalo_CLR_year_harmonics %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+                    dplyr::select(x1) %>% unlist()) - xmin, 
+       as.numeric(buffalo_CLR_year_harmonics %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+                    dplyr::select(y1) %>% unlist())  - ymin)
+
+}
+toc()
+
+# plot(ud_norm_list[[1]])
+# plot(ud_norm_list[[2]])
+# plot(ud_norm_list[[3]])
+# plot(ud_norm_list[[4]])
+# plot(ud_norm_list[[5]])
+
+for(i in 1:25) {
+  plot(ud_norm_list[[i]])
+  points(as.numeric(buffalo_CLR_year_harmonics %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i-1)) %>% 
+                    dplyr::select(x1) %>% unlist()) - xmin, 
+         as.numeric(buffalo_CLR_year_harmonics %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i-1)) %>% 
+                    dplyr::select(y1) %>% unlist())  - ymin)
+}
+
+terra::writeRaster(terra::rast(ud_norm_list), "mapping/MC-BM_approx_preds_20230525.tif")
+# save.image("MC-BM_approx_preds_20230524.RData")
+
+```
+
+Vectorising the bulk of the function
+
+```{r}
+
+# month_no <- 9
+
+MCBM_preds_list <- vector(mode = "list", length = 12)
+
+n_proposals <- 10
+grid_res <- terra::res(naive_ud_cropped)[1]
+rows <- terra::nrow(naive_ud_cropped)
+cols <- terra::ncol(naive_ud_cropped)
+xmax <- ext(naive_ud_cropped[[1]])[2] 
+ymax <- ext(naive_ud_cropped[[1]])[4]
+
+for(month_no in 1:12) {
+
+tic()
+
+# Create grid of x and y points
+x_points <- rep(1:cols, each = rows)
+y_points <- rep(1:rows, times = cols)
+
+# Generate random angles and lengths
+ta <- runif(n_proposals * length(x_points), min = -pi, max = pi)
+sl <- rgamma(n_proposals * length(x_points), shape = monthly_coefs$shape[month_no], scale = monthly_coefs$scale[month_no])
+
+# Calculate proposal points
+x_proposal <- ((-(grid_res/2) + x_points * grid_res) + sl * sin(ta)) %% xmax
+y_proposal <- ((-(grid_res/2) + y_points * grid_res) + sl * cos(ta)) %% ymax
+
+# exp(beta * Z(x))
+# plot(naive_ud_cropped[[i]])
+
+# exp(beta * Z(z)) * psi(.) dz
+Beta_Z_z_proposed <- terra::extract(naive_ud_cropped[[month_no]], cbind(x_proposal, y_proposal))[,1]
+Beta_Z_z_array <- array(Beta_Z_z_proposed, dim = c(rows, cols , n_proposals))
+Beta_Z_z_matrix <- apply(Beta_Z_z_array, 1:2, mean, na.rm = TRUE)
+
+toc()
+
+Beta_Z_z <- flip(terra::setValues(naive_ud_cropped[[month_no]], Beta_Z_z_matrix))
+# plot(naive_ud_cropped[[i]])
+# plot(Beta_Z_z)
+
+# exp(beta * Z(x)) * exp(beta * Z(z)) * psi(.) dz
+u_x_unnorm <- naive_ud_cropped[[month_no]] * Beta_Z_z
+# plot(u_x_unnorm)
+u_x <- u_x_unnorm / as.numeric(terra::global(u_x_unnorm, fun = "sum", na.rm = TRUE))
+names(u_x) <- paste0("MCBM_month_", month_no)
+# plot(u_x)
+
+MCBM_preds_list[[month_no]] <- u_x
+
+}
+
+```
+
+Plotting
+
+```{r}
+
+for(month_no in 1:12) {
+
+# exp(beta * Z(x))
+plot(naive_ud_cropped[[month_no]])
+plot(naive_ud_cropped[[month_no]])
+points(as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month == month_no) %>% 
+                    dplyr::select(x1) %>% unlist()) - xmin, 
+       as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month == month_no) %>% 
+                    dplyr::select(y1) %>% unlist()) - ymin)
+
+# exp(beta * Z(z)) * psi(.) dz
+plot(Beta_Z_z)
+
+# exp(beta * Z(x)) * exp(beta * Z(z)) * psi(.) dz
+plot(MCBM_preds_list[[month_no]])
+plot(MCBM_preds_list[[month_no]])
+points(as.numeric(buffalo_CLR_year %>%
+                    filter(y == 1 & month == month_no) %>%
+                    dplyr::select(x1) %>% unlist()) - xmin,
+       as.numeric(buffalo_CLR_year %>%
+                    filter(y == 1 & month == month_no) %>%
+                    dplyr::select(y1) %>% unlist()) - ymin)
+
+}
+
+```
+
+
+Boyce index 
+
+```{r}
+
+boyce_naive_list <- vector(mode = "list", length = 12)
+boyce_MCBM_list <- vector(mode = "list", length = 12)
+
+for(month_no in 1:12) {
+
+buffalo_obs <- buffalo_CLR_year_harmonics %>% 
+  filter(y == 1 & month == month_no) %>% 
+  transmute(x = x1 - xmin, y = y1 - ymin)
+
+naive_raster <- raster(naive_ud_cropped[[month_no]])
+boyce_naive_list[[month_no]] <- ecospat.boyce2(naive_raster, buffalo_obs, method = "spearman")
+boyce_naive_list[[month_no]]
+
+MCBM_raster <- raster(MCBM_preds_list[[month_no]])
+boyce_MCBM_list[[month_no]] <- ecospat.boyce2(MCBM_raster, buffalo_obs, method = "spearman")
+boyce_MCBM_list[[month_no]]
+
+}
+
+```
+
+
+```{r}
+
+spearman_cor_naive <- c()
+spearman_cor_MCBM <- c()
+
+for(i in 1:12) {
+  print(boyce_naive_list[[i]]$cor)
+  spearman_cor_naive[i] <- boyce_naive_list[[i]]$cor
+}
+
+for(i in 1:12) {
+  print(boyce_MCBM_list[[i]]$cor)
+  spearman_cor_MCBM[i] <- boyce_MCBM_list[[i]]$cor
+}
+
+mean(spearman_cor_naive)
+sd(spearman_cor_naive)
+
+mean(spearman_cor_MCBM)
+sd(spearman_cor_MCBM)
+
+```
+

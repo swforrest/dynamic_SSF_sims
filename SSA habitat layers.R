@@ -7,8 +7,8 @@ library(terra)
 ndvi_projected <- rast("mapping/cropped rasters/ndvi_GEE_projected_watermask20230207.tif")
 
 # scaling from the buffalo data
-scaling_mean <- as.numeric(attributes(buffalo_CLR_year$ndvi_scaled)[1]) # 0.3125089
-scaling_sd <- as.numeric(attributes(buffalo_CLR_year$ndvi_scaled)[2]) # 0.143179 for July 2018
+scaling_mean <- as.numeric(attributes(buffalo_CLR_year_harmonics$ndvi_scaled)[1]) # 0.3125089
+scaling_sd <- as.numeric(attributes(buffalo_CLR_year_harmonics$ndvi_scaled)[2]) # 0.143179 for July 2018
 ndvi_stack_scaled <- (ndvi_projected - scaling_mean) / scaling_sd
 # plot(ndvi_stack_scaled)
 # time_vector <- terra::time(ndvi_projected)

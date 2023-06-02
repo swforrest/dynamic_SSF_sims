@@ -58,7 +58,7 @@ buffalo_CLR_year <- buffalo_CLR %>% filter(id %in% buffalo_year_ids)
 unique(buffalo_CLR_year$id)
 
 
-#Aligning step ids
+# Aligning step ids
 
 # rounded_hours <- unique(round_date(buffalo_CLR_year$t1, "hour"))
 # rounded_hours <- rounded_hours[order(rounded_hours)]

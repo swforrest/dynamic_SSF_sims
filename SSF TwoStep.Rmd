@@ -168,8 +168,6 @@ With 3 pairs of harmonics
 
 ```{r three harmonics}
 
-# auto.arima()
-
 formula_twostep <- y ~ 
   
   ndvi_scaled +
@@ -231,6 +229,21 @@ formula_twostep <- y ~
   # yday_c4:canopy_2 +
   # yday_c5:canopy_2 +
   # yday_c6:canopy_2 +
+  
+  herby_scaled +
+  yday_s1:herby_scaled +
+  yday_s2:herby_scaled +
+  yday_s3:herby_scaled +
+  # yday_s4:herby_scaled +
+  # yday_s5:herby_scaled +
+  # yday_s6:herby_scaled +
+  
+  yday_c1:herby_scaled +
+  yday_c2:herby_scaled +
+  yday_c3:herby_scaled +
+  # yday_c4:herby_scaled +
+  # yday_c5:herby_scaled +
+  # yday_c6:herby_scaled +
   
   sl +
   yday_s1:sl +
@@ -295,7 +308,8 @@ model_twostep <- Ts.estim(formula = formula_twostep,
          itermax = 10000) # default = 2000
 toc()
 
-model_twostep_2harms <- model_twostep
+# model_twostep_2harms <- model_twostep
+model_twostep_3harms <- model_twostep
 # model_twostep <- model_twostep_3harms
 
 ```
@@ -316,18 +330,18 @@ Reconstructing coefficients with two harmonics with quadratics
 ```{r}
 
 yday <- seq(0,365,1)
-# hour <- seq(1,24,1)
+# yday <- seq(1,24,1)
 
 yday_harmonics_df <- data.frame("yday_s1" = sin(2*pi*yday/365),
                                 "yday_s2" = sin(4*pi*yday/365),
-                                # "hour_s3" = sin(6*pi*hour/24),
-                                # "hour_s4" = sin(8*pi*hour/24),
+                                # "yday_s3" = sin(6*pi*yday/24),
+                                # "yday_s4" = sin(8*pi*yday/24),
                                 "yday_c1" = cos(2*pi*yday/365),
                                 "yday_c2" = cos(4*pi*yday/365))
-                                # "hour_c3" = cos(6*pi*hour/24),
-                                # "hour_c4" = cos(8*pi*hour/24))
+                                # "yday_c3" = cos(6*pi*yday/24),
+                                # "yday_c4" = cos(8*pi*yday/24))
 
-# plot(x = hour, y = yday_harmonics_df$hour_s1, type = "l")
+# plot(x = yday, y = yday_harmonics_df$yday_s1, type = "l")
 
 coef_names <- names(model_twostep$beta)[1:8] # only get linear terms
 
@@ -355,7 +369,7 @@ plot(x = yday,
 }
 
 
-hourly_coefs_2harms_quads <- data.frame("hour" = yday,
+yday_coefs_2harms_quads <- data.frame("yday" = yday,
                                   "ndvi" = (harmonic_coefs_list[[1]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[1]][2:5]),
                                   "ndvi_quad" = (harmonic_coefs_list[[2]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[2]][2:5]),
                                   "canopy" = (harmonic_coefs_list[[3]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[3]][2:5]),
@@ -367,256 +381,53 @@ hourly_coefs_2harms_quads <- data.frame("hour" = yday,
 
 ```
 
+Reconstructing coefficients with three harmonics with quadratics
 
 ```{r}
 
-# 1:length(model_twostep$beta)
-# names(model_twostep$beta)
-# as.numeric(model_twostep$beta)
-# as.numeric(model_twostep$se)
-# as.numeric(diag(model_twostep$D))
+yday_harmonics_df <- data.frame("yday_s1" = sin(2*pi*yday/365),
+                                "yday_s2" = sin(4*pi*yday/365),
+                                "yday_s3" = sin(6*pi*yday/365),
+                                # "yday_s4" = sin(8*pi*yday/24),
+                                "yday_c1" = cos(2*pi*yday/365),
+                                "yday_c2" = cos(4*pi*yday/365),
+                                "yday_c3" = cos(6*pi*yday/365))
+                                # "yday_c4" = cos(8*pi*yday/24))
 
-coefs_df_function <- function(clogit_model) {
-  
-  return(data.frame("index" = 1:length(model_twostep$beta), 
-                    "coef" = names(model_twostep$beta), 
-                    "value" = as.numeric(model_twostep$beta), 
-                    "se" = as.numeric(model_twostep$se),
-                    "ind.var" = as.numeric(diag(model_twostep$D))))
-}
+coef_names <- names(model_twostep$beta)[1:8] # only get linear terms
 
-clogit_model_coefs <- coefs_df_function(model_twostep)
+harmonic_coefs_list <- vector(mode = "list", length = length(coef_names))
 
-# store the coefficients of each model fit
-# clogit_model_coefs_2harms <- clogit_model_coefs
-clogit_model_coefs_3harms <- clogit_model_coefs
-
-# clogit_model_coefs <- clogit_model_coefs_2harms
-clogit_model_coefs <- clogit_model_coefs_3harms
-
-```
-
-Calculating the coefficient curves across the year (by yday)
-
-```{r temporal coefficients 2 harmonics}
-
-# clogit_coef_df <- clogit_model_coefs
-
-x_yday <- seq(1, 365, 1)
-
-y_yday <- function(x,
-                    lin_coef,
-                    sin_coef1,
-                    sin_coef2,
-                    cos_coef1,
-                    cos_coef2) {
-
-  lin_coef +
-    (sin_coef1 * sin(2 * pi * x / 365)) +
-    (sin_coef2 * sin(4 * pi * x / 365)) +
-    (cos_coef1 * cos(2 * pi * x / 365)) +
-    (cos_coef2 * cos(4 * pi * x / 365))
+for(i in 1:length(coef_names)) {
+harmonic_coefs_list[[i]] <- c(model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i]))],
+                              model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i], ":yday_s1"))],
+                               model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i], ":yday_s2"))],
+                               model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i], ":yday_s3"))],
+                               model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i], ":yday_c1"))],
+                               model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i], ":yday_c2"))],
+                               model_twostep$beta[which(names(model_twostep$beta) == paste0(coef_names[i], ":yday_c3"))])
 }
 
 
-
-harmonic_coefs_function <- function(clogit_coef_df) {
-
-y_ndvi <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c2")])
-
-y_ndvi_quad <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c2")])
-
-y_canopy <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c2")])
-
-y_canopy_quad <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c2")])
-
-y_sl <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c2")])
-
-y_log_sl <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c2")])
-
-y_cos_ta <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c2")])
-
-return(data.frame("yday" = x_yday,
-                  "NDVI" = y_ndvi, 
-                  "NDVI_quadratic" = y_ndvi_quad, 
-                  "Canopy_cover" = y_canopy, 
-                  "Canopy_cover_quadratic" = y_canopy_quad, 
-                  "Step_length" = y_sl,
-                  "log_Step_length" = y_log_sl, 
-                  "cos_Turning_angle" = y_cos_ta))
-
+for(i in 1:length(coef_names)) {
+plot(x = yday, 
+     y = (harmonic_coefs_list[[i]][1] + 
+            as.matrix(yday_harmonics_df) %*% 
+            harmonic_coefs_list[[i]][2:7]), # change for 3 harmonics
+     main = paste0(coef_names[i]),
+     ylab = "Temporally varying coefficient",
+     type = "l")
 }
 
-
-# clogit_model_coefs$value[which(clogit_model_coefs$coef == "cos_ta:yday_s1")]
-
-# running the function
-harmonic_coefs_df <- harmonic_coefs_function(clogit_model_coefs)
-
-# harmonic_coefs_df_2harms <- harmonic_coefs_df
-
-```
-
-For the 3 harmonic model
-
-```{r temporal coefficients 3 harmonics}
-
-# clogit_coef_df <- clogit_model_coefs
-
-x_yday <- seq(1, 365, 1)
-
-y_yday <- function(x,
-                    lin_coef,
-                    sin_coef1,
-                    sin_coef2,
-                    sin_coef3,
-                    cos_coef1,
-                    cos_coef2,
-                    cos_coef3) {
-
-  lin_coef +
-    (sin_coef1 * sin(2 * pi * x / 365)) +
-    (sin_coef2 * sin(4 * pi * x / 365)) +
-    (sin_coef3 * sin(6 * pi * x / 365)) +
-    (cos_coef1 * cos(2 * pi * x / 365)) +
-    (cos_coef2 * cos(4 * pi * x / 365)) +
-    (cos_coef3 * cos(6 * pi * x / 365))
-}
-
-
-
-harmonic_coefs_function <- function(clogit_coef_df) {
-
-y_ndvi <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_s3")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_scaled:yday_c3")])
-
-y_ndvi_quad <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_s3")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "ndvi_2:yday_c3")])
-
-y_canopy <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_s3")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_scaled:yday_c3")])
-
-y_canopy_quad <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_s3")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "canopy_2:yday_c3")])
-
-y_sl <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_s3")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "sl:yday_c3")])
-
-y_log_sl <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_s3")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "log_sl:yday_c3")])
-
-y_cos_ta <- map_dbl(x_yday,
-             y_yday,
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_s3")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c1")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c2")],
-             clogit_coef_df$value[which(clogit_coef_df$coef == "cos_ta:yday_c3")])
-
-return(data.frame("yday" = x_yday,
-                  "NDVI" = y_ndvi, 
-                  "NDVI_quadratic" = y_ndvi_quad, 
-                  "Canopy_cover" = y_canopy, 
-                  "Canopy_cover_quadratic" = y_canopy_quad, 
-                  "Step_length" = y_sl,
-                  "log_Step_length" = y_log_sl, 
-                  "cos_Turning_angle" = y_cos_ta))
-
-}
-
-
-# clogit_model_coefs$value[which(clogit_model_coefs$coef == "cos_ta:yday_s1")]
-
-# running the function
-harmonic_coefs_df <- harmonic_coefs_function(clogit_model_coefs)
-
-harmonic_coefs_df_3harms <- harmonic_coefs_df
+yday_coefs_2harms_quads <- data.frame("yday" = yday,
+                                  "ndvi" = (harmonic_coefs_list[[1]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[1]][2:7]),
+                                  "ndvi_quad" = (harmonic_coefs_list[[2]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[2]][2:7]),
+                                  "canopy" = (harmonic_coefs_list[[3]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[3]][2:7]),
+                                  "canopy_quad" = (harmonic_coefs_list[[4]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[4]][2:7]),
+                                  "herby" = (harmonic_coefs_list[[5]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[5]][2:7]),
+                                  "sl" = (harmonic_coefs_list[[6]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[6]][2:7]),
+                                  "log_sl" = (harmonic_coefs_list[[7]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[7]][2:7]),
+                                  "cos_ta" = (harmonic_coefs_list[[8]][1] + as.matrix(yday_harmonics_df) %*% harmonic_coefs_list[[8]][2:7]))
 
 ```
 
@@ -638,124 +449,29 @@ tentative_shape <- 0.438167
 tentative_scale <- 534.3507
 tentative_kappa <- 0.1848126
 
-harmonic_coefs_df <- harmonic_coefs_df %>% mutate(shape = tentative_shape + log_Step_length,
-                             scale = 1/((1/tentative_scale) - Step_length),
-                             kappa = tentative_kappa + cos_Turning_angle)
+yday_coefs_2harms_quads <- yday_coefs_2harms_quads %>% mutate(shape = tentative_shape + log_sl,
+                             scale = 1/((1/tentative_scale) - sl),
+                             kappa = tentative_kappa + cos_ta)
 
 # write_csv(harmonic_coefs_df, "outputs/harmonic_coefs_df_with_movement_params_ndvi_canopy_quads_20230519.csv")
 
 # turning into a long data frame
-harmonic_coefs <- pivot_longer(harmonic_coefs_df, cols = !1, names_to = "coef")
+yday_coefs_2harms_quads_long <- pivot_longer(yday_coefs_2harms_quads, cols = !1, names_to = "coef")
 
 # write_csv(harmonic_coefs, "outputs/harmonic_coefs_df_long_with_movement_params_ndvi_canopy_quads_20230519.csv")
 
 ```
 
 
-```{r}
-
-x <- seq(0,500,1)
-
-# step length distribution
-plot(x, dgamma(x, 
-       shape = harmonic_coefs %>% filter(yday == 1) %>% 
-         dplyr::filter(coef == "shape") %>% dplyr::pull(value),
-       scale = harmonic_coefs %>% filter(yday == 1) %>% 
-         dplyr::filter(coef == "scale") %>% dplyr::pull(value)),
-     type = "l",
-     main = "Step length distribution",
-     xlab = "Distance (m)",
-     ylab = "Density")
-
-xvm <- seq(-pi, pi, 0.01)
-
-plot(xvm, dvonmises(xvm, 
-          mu = 0, 
-          kappa = harmonic_coefs %>% filter(yday == 1) %>% 
-            dplyr::filter(coef == "kappa") %>% dplyr::pull(value),
-          log = FALSE),
-     type = "l",
-     main = "Turning angle distribution",
-     xlab = "Turning angle (rad)",
-     ylab = "Density",
-     ylim = c(0,0.21))
-
-
-```
-
-
 
 ```{r}
 
-n <- 1e5
-
-shape <- harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% dplyr::filter(coef == "shape") %>% dplyr::pull(value)
-scale <- harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% dplyr::filter(coef == "scale") %>% dplyr::pull(value)
-kappa <- harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% dplyr::filter(coef == "kappa") %>% dplyr::pull(value)
-
-sl <- rgamma(n, shape = shape, scale = scale)
-hist(sl, breaks = 100)
-ta <- as.numeric(Rfast::rvonmises(n, m = pi, k = 0.78) - pi)
-hist(ta, breaks = 100)
-
-x_s <- sl * sin(ta)
-y_s <- sl * cos(ta)
-xy_mk <- data.frame("x_pos" = x_s, "y_pos" = y_s)
-
-ggplot(data = xy_mk, aes(x = x_pos, y = y_pos)) +
-  geom_point(alpha = 0.1) +
-  # geom_density_2d_filled(data = xy_mk, aes(x = x_pos, y = y_pos)) +
-  # geom_hex(bins = 30) +
-  # geom_bin_2d(bins = 50) +
-  scale_x_continuous("x position") +
-  scale_y_continuous("y position") +
-  # scale_fill_viridis_c() +
-  geom_point(aes(x = 0, y = 0), colour = "red", alpha = 0.25) +
-  coord_equal() +
-  theme_bw()
-
-```
-
-
-
-```{r}
-
-coefs <- unique(harmonic_coefs$coef)
+coefs <- unique(yday_coefs_2harms_quads_long$coef)
 # coef_titles <- c("NDVI", "Slope", "Herbaceous vegetation", "Canopy cover", "Step length", "log(Step length)", "cos(Turning angle)")
 
-for(i in 1:length(coefs)) {
-  
-  i = 1
-  
-  gg <- ggplot() +
-  # geom_line(data = harmonic_coefs %>% 
-  #             filter(coef %in% unique(harmonic_coefs$coef)), # %>% # [1:4]
-  #             # filter(coef == coefs[i]), 
-  #           aes(x = yday, y = value, group = id), colour = "grey") + # , colour = factor(id)
-    geom_line(data = harmonic_coefs %>% 
-                filter(coef == coefs[i]), aes(x = yday, y = value, colour = factor(coef))) +
-    geom_hline(yintercept = 0, linetype = "dashed") +
-    scale_y_continuous(expression(Time-varying~parameter~values~beta)) +
-    scale_x_continuous() + # breaks = seq(0,)
-    scale_color_discrete("Estimate") +
-    ggtitle(coefs[i]) +
-    theme_classic() +
-    theme(legend.position = "bottom")
-  
-  print(gg)
-
-  # ggsave(paste("outputs/plots/clr_fitting/clr_harmonic_20230208_", coef_titles[i], ".png", sep = ""),
-  # width=150, height=90, units="mm", dpi = 300)
-  
-}
-
-
-# with just the means 
-
 ggplot() +
-    geom_path(data = harmonic_coefs %>% 
-                # filter(id %in% unique(harmonic_coefs$id)[11]) %>% 
-                filter(coef %in% unique(harmonic_coefs$coef)[1:7]), 
+    geom_path(data = yday_coefs_2harms_quads_long %>%
+                filter(coef %in% unique(yday_coefs_2harms_quads_long$coef)[1:5]),
               aes(x = yday, y = value, colour = coef)) +
     geom_hline(yintercept = 0, linetype = "dashed") +
     scale_y_continuous(expression(Time-varying~parameter~values~beta)) +
@@ -765,145 +481,131 @@ ggplot() +
     theme_classic() +
     theme(legend.position = "bottom")
 
-ggsave(paste("outputs/plots/clr_fitting/clr_3harmonics_all_quads_20230519.png", sep = ""),
-  width=150, height=90, units="mm", dpi = 300)
+# ggsave(paste("outputs/plots/clr_fitting/clr_3harmonics_all_quads_20230519.png", sep = ""),
+#   width=150, height=90, units="mm", dpi = 300)
 # ggsave(paste("outputs/plots/clr_fitting/clr_harmonic_all_pres_20230208.png", sep = ""),
 #   width=300, height=180, units="mm", dpi = 300)
 
-
 ggplot() +
-    geom_path(data = harmonic_coefs %>% 
-                filter(id %in% unique(harmonic_coefs$id)[11]) %>% 
-                filter(coef %in% unique(harmonic_coefs$coef)[8:10]), 
-              aes(x = month, y = value, colour = coef)) +
+    geom_path(data = yday_coefs_2harms_quads_long %>% 
+                filter(coef %in% unique(yday_coefs_2harms_quads_long$coef)[c(9,11)]), 
+              aes(x = yday, y = value, colour = coef)) +
     geom_hline(yintercept = 0, linetype = "dashed") +
     scale_y_continuous(expression(beta)) +
-    scale_x_continuous(breaks = 0:12) +
+    scale_x_continuous("Day of the year") +
     scale_color_discrete("Estimate") +
     # ggtitle(coef_titles[i]) +
     theme_classic() +
     theme(legend.position = "bottom")
 
-
 ggplot() +
-    geom_path(data = harmonic_coefs %>% 
-                filter(id %in% unique(harmonic_coefs$id)[11]) %>% 
-                filter(coef %in% unique(harmonic_coefs$coef)[c(8,10)]), 
-              aes(x = month, y = value, colour = coef)) +
+    geom_path(data = yday_coefs_2harms_quads_long %>% 
+                filter(coef %in% unique(yday_coefs_2harms_quads_long$coef)[10]), 
+              aes(x = yday, y = value, colour = coef)) +
     geom_hline(yintercept = 0, linetype = "dashed") +
     scale_y_continuous(expression(beta)) +
-    scale_x_continuous(breaks = 0:12) +
+    scale_x_continuous("Day of the year") +
     scale_color_discrete("Estimate") +
     # ggtitle(coef_titles[i]) +
     theme_classic() +
     theme(legend.position = "bottom")
-
-harmonic_coefs %>% filter(id %in% unique(harmonic_coefs$id)[11])
 
 ```
 
 
 
+```{r}
+
+# x <- seq(0,500,1)
+# 
+# # step length distribution
+# plot(x, dgamma(x, 
+#        shape = harmonic_coefs %>% filter(yday == 1) %>% 
+#          dplyr::filter(coef == "shape") %>% dplyr::pull(value),
+#        scale = harmonic_coefs %>% filter(yday == 1) %>% 
+#          dplyr::filter(coef == "scale") %>% dplyr::pull(value)),
+#      type = "l",
+#      main = "Step length distribution",
+#      xlab = "Distance (m)",
+#      ylab = "Density")
+# 
+# xvm <- seq(-pi, pi, 0.01)
+# 
+# plot(xvm, dvonmises(xvm, 
+#           mu = 0, 
+#           kappa = harmonic_coefs %>% filter(yday == 1) %>% 
+#             dplyr::filter(coef == "kappa") %>% dplyr::pull(value),
+#           log = FALSE),
+#      type = "l",
+#      main = "Turning angle distribution",
+#      xlab = "Turning angle (rad)",
+#      ylab = "Density",
+#      ylim = c(0,0.21))
+
+```
+
+
 
 ```{r}
 
-x <- seq(0, 1000, length = 500)
-dgamma(x, shape = tentative_shape, scale = tentative_scale)
+# n <- 1e5
+# 
+# shape <- harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% dplyr::filter(coef == "shape") %>% dplyr::pull(value)
+# scale <- harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% dplyr::filter(coef == "scale") %>% dplyr::pull(value)
+# kappa <- harmonic_coefs %>% filter(id == "Weighted mean" & month == 12) %>% dplyr::filter(coef == "kappa") %>% dplyr::pull(value)
+# 
+# sl <- rgamma(n, shape = shape, scale = scale)
+# hist(sl, breaks = 100)
+# ta <- as.numeric(Rfast::rvonmises(n, m = pi, k = 0.78) - pi)
+# hist(ta, breaks = 100)
+# 
+# x_s <- sl * sin(ta)
+# y_s <- sl * cos(ta)
+# xy_mk <- data.frame("x_pos" = x_s, "y_pos" = y_s)
+# 
+# ggplot(data = xy_mk, aes(x = x_pos, y = y_pos)) +
+#   geom_point(alpha = 0.1) +
+#   # geom_density_2d_filled(data = xy_mk, aes(x = x_pos, y = y_pos)) +
+#   # geom_hex(bins = 30) +
+#   # geom_bin_2d(bins = 50) +
+#   scale_x_continuous("x position") +
+#   scale_y_continuous("y position") +
+#   # scale_fill_viridis_c() +
+#   geom_point(aes(x = 0, y = 0), colour = "red", alpha = 0.25) +
+#   coord_equal() +
+#   theme_bw()
 
-temporal_movement_params <- harmonic_coefs_df %>% filter(id == "Weighted mean") %>% dplyr::select(c("month", "shape", "scale", "kappa"))
-# write_csv(temporal_movement_params, "outputs/temporal_movement_params_CLR_20230210.csv")
-
-ggplot() +
-  stat_function(fun = dgamma, args = list(shape = tentative_shape, scale = tentative_scale)) +
-  scale_x_continuous(limits = c(0,1000), breaks = seq(0,1000,100)) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  theme_classic()
+```
 
 
-subset <- temporal_movement_params %>% filter(month < 1)
 
-ggplot(subset) +
-  stat_function(fun = dgamma, args = list(shape = shape, scale = scale)) +
-  scale_x_continuous(limits = c(0,1000), breaks = seq(0,1000,100)) +
-  geom_hline(yintercept = 0, linetype = "dashed") +
-  theme_classic()
+```{r}
+
+# x <- seq(0, 1000, length = 500)
+# dgamma(x, shape = tentative_shape, scale = tentative_scale)
+# 
+# temporal_movement_params <- harmonic_coefs_df %>% filter(id == "Weighted mean") %>% dplyr::select(c("month", "shape", "scale", "kappa"))
+# # write_csv(temporal_movement_params, "outputs/temporal_movement_params_CLR_20230210.csv")
+# 
+# ggplot() +
+#   stat_function(fun = dgamma, args = list(shape = tentative_shape, scale = tentative_scale)) +
+#   scale_x_continuous(limits = c(0,1000), breaks = seq(0,1000,100)) +
+#   geom_hline(yintercept = 0, linetype = "dashed") +
+#   theme_classic()
+# 
+# 
+# subset <- temporal_movement_params %>% filter(month < 1)
+# 
+# ggplot(subset) +
+#   stat_function(fun = dgamma, args = list(shape = shape, scale = scale)) +
+#   scale_x_continuous(limits = c(0,1000), breaks = seq(0,1000,100)) +
+#   geom_hline(yintercept = 0, linetype = "dashed") +
+#   theme_classic()
 
 ```
 
 
 # Generating predictions
-
-Importing habitat layers
-
-```{r}
-
-ndvi_projected <- rast("mapping/cropped rasters/ndvi_GEE_projected_watermask20230207.tif")
-
-# scaling from the buffalo data
-scaling_mean <- as.numeric(attributes(buffalo_CLR_year$ndvi_scaled)[1]) # 0.3125089
-scaling_sd <- as.numeric(attributes(buffalo_CLR_year$ndvi_scaled)[2]) # 0.143179 for July 2018
-
-ndvi_stack_scaled <- (ndvi_projected - scaling_mean) / scaling_sd
-# plot(ndvi_stack_scaled)
-# time_vector <- terra::time(ndvi_projected)
-# terra::time(ndvi_stack_scaled) <- NULL
-# terra::time(ndvi_stack_scaled) <- lubridate::date(as.POSIXlt(as.POSIXlt("1970/01/01 00:00:00") + time_vector))
-
-# ndvi_above0_stack_scaled <- rast("mapping/cropped rasters/ndvi_above0_stack_scaled_20230210.tif")
-
-```
-
-For plotting with terra 
-
-```{r}
-
-# elev <- rast("mapping/cropped rasters/DEM_H_raster.tif")
-slope <- rast("mapping/cropped rasters/slope_raster.tif")
-veg_herby <- rast("mapping/cropped rasters/veg_herby.tif")
-canopy_cover <- rast("mapping/cropped rasters/canopy_cover.tif")
-# 
-# ndvi_july2018 <- ndvi_projected[[7]]
-# 
-# names(slope) <- "Slope"
-# names(veg_herby) <- "Herbaceous vegetation"
-# names(canopy_cover) <- "Canopy cover"
-# names(ndvi_july2018) <- "NDVI July 2018"
-# 
-# # plot(elev)
-# plot(slope)
-# plot(veg_herby)
-# plot(canopy_cover)
-# plot(ndvi_july2018)
-# 
-# plot_stack <- c(ndvi_july2018, slope, veg_herby, canopy_cover)
-# 
-# png(filename = "outputs/plots/ndvi_slope_herb_canopy_layers_20230208.png",
-#     width = 300, height = 175, units = "mm", res = 300)
-# plot(plot_stack)
-# dev.off()
-
-```
-
-Scaled rasters
-
-```{r}
-
-# hist(buffalo_CLR_year$slope_scaled)
-# slope_scaled <- (slope - attr(buffalo_CLR_year$slope_scaled, "scaled:center")) / attr(buffalo_CLR_year$slope_scaled, "scaled:scale")
-# plot(slope_scaled)
-# 
-# writeRaster(slope_scaled, "mapping/cropped rasters/slope_scaled_by_buffalo_data_20230210.tif")
-slope_scaled <- rast("mapping/cropped rasters/slope_scaled_by_buffalo_data_20230210.tif")
-
-# hist(buffalo_CLR_year$canopy_scaled)
-# canopy_scaled <- ((canopy_cover / 100) - attr(buffalo_CLR_year$canopy_scaled, "scaled:center")) / attr(buffalo_CLR_year$canopy_scaled, "scaled:scale")
-# plot(canopy_scaled)
-# 
-# writeRaster(canopy_scaled, "mapping/cropped rasters/canopy_scaled_by_buffalo_data_20230210.tif")
-canopy_scaled <- rast("mapping/cropped rasters/canopy_scaled_by_buffalo_data_20230210.tif")
-
-```
-
 
 Checking distributions of covariates vs used and random locations
 
@@ -939,7 +641,6 @@ ggplot() +
   geom_density(data = enviro_buffalo_values, aes(x = slope, fill = Data), alpha = 0.25) +
   theme_classic()
 
-
 tab <- as.data.frame(prop.table(table(enviro_buffalo_values$canopy, enviro_buffalo_values$Data), 2))
 names(tab) <- c("Canopy_cover", "Data", "Freq")
 
@@ -964,15 +665,16 @@ dates <- make_datetime(year = years, month = months, day = day, tz = "Australia/
 #                          "canopy" = harmonic_weighted_mean$Canopy_cover[seq(1, 111, 10)])
 
 monthly_coefs <- data.frame("date" = dates,
-                         "ndvi" = harmonic_coefs_df$NDVI[seq(1, 331, 30)],
-                         "ndvi_quad" = harmonic_coefs_df$NDVI_quadratic[seq(1, 331, 30)],
-                         "canopy" = harmonic_coefs_df$Canopy_cover[seq(1, 331, 30)],
-                         "canopy_quad" = harmonic_coefs_df$Canopy_cover_quadratic[seq(1, 331, 30)],
-                         "shape" = harmonic_coefs_df$shape[seq(1, 331, 30)],
-                         "scale" = harmonic_coefs_df$scale[seq(1, 331, 30)],
-                         "kappa" = harmonic_coefs_df$kappa[seq(1, 331, 30)])
+                         "ndvi" = yday_coefs_2harms_quads$ndvi[seq(15, 346, 30)],
+                         "ndvi_quad" = yday_coefs_2harms_quads$ndvi_quad[seq(15, 346, 30)],
+                         "canopy" = yday_coefs_2harms_quads$canopy[seq(15, 346, 30)],
+                         "canopy_quad" = yday_coefs_2harms_quads$canopy_quad[seq(15, 346, 30)],
+                         "herby" = yday_coefs_2harms_quads$herby[seq(15, 346, 30)],
+                         "shape" = yday_coefs_2harms_quads$shape[seq(15, 346, 30)],
+                         "scale" = yday_coefs_2harms_quads$scale[seq(15, 346, 30)],
+                         "kappa" = yday_coefs_2harms_quads$kappa[seq(15, 346, 30)])
 
-# write_csv(monthly_coefs, "outputs/weighted_mean_monthly_CLR_coefs_wide_yday_with_movement_params_20230424.csv") # weighted mean
+write_csv(monthly_coefs, "outputs/monthly_coefs_wide_yday_with_movement_params_20230530.csv") 
 
 monthly_coefs_long <- monthly_coefs %>% pivot_longer(cols = !date)
 
@@ -1067,13 +769,14 @@ ecospat.boyce2 <- function (fit, obs, nclass = 0, window.w = "default", res = 10
 
 boyce_naive_list <- vector(mode = "list", length = 12)
 naive_pred_stack <- c()
+naive_norm_stack <- c()
 
 for(i in 1:12) {
 
 resources <- c(ndvi_stack_scaled[[which(time(ndvi_stack_scaled) == monthly_coefs$date[i])]], 
                # slope_scaled,
-               # veg_herby, 
-               canopy_scaled)
+               canopy_scaled,
+               herby_scaled)
 
 # ndvi
 ndvi_lin <- resources[[1]]
@@ -1099,14 +802,21 @@ canopy_quad <- (canopy_quad ^ 2) * monthly_coefs$canopy_quad[[i]]
 canopy_pred <- canopy_lin + canopy_quad
 # plot(canopy_pred)
 
+# herby
+herby_lin <- resources[[3]]
+herby_pred <- herby_lin * monthly_coefs$herby[[i]] 
+# plot(herby_pred)
+
 # combining
-naive_pred <- exp(ndvi_pred + canopy_pred) / global(exp(ndvi_pred + canopy_pred), fun = "sum", na.rm = TRUE)[[1]]
-plot(naive_pred)
-plot(naive_pred)
+naive_pred <- exp(ndvi_pred + canopy_pred + herby_pred)
+naive_norm <- naive_pred / global(naive_pred, fun = "sum", na.rm = TRUE)[[1]]
+
+plot(naive_norm)
 points(as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(x1) %>% unlist()), 
        as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(y1) %>% unlist()))
 
 naive_pred_stack <- c(naive_pred_stack, naive_pred)
+naive_norm_stack <- c(naive_norm_stack, naive_norm)
 
 
 # setting up the buffalo observation data for the relevant month
@@ -1118,7 +828,7 @@ naive_pred_stack <- c(naive_pred_stack, naive_pred)
 buffalo_obs <- buffalo_CLR_year %>% filter(y == 1 & month == i) %>% 
   transmute(x = x1, y = y1)
 
-naive_raster <- raster(naive_pred)
+naive_raster <- raster(naive_norm)
 # naive_raster <- raster(naive_pred_cropped)
 
 # plot(naive_pred)
@@ -1142,10 +852,12 @@ boyce_naive_list[[i]]
 
 }
 
-# naive_raster_2harms <- naive_raster
+# naive_pred_2harms <- naive_pred_stack
+# naive_norm_2harms <- naive_norm_stack
 # boyce_naive_list_2harms <- boyce_naive_list
 
-naive_raster_3harms <- naive_raster
+naive_pred_3harms <- naive_pred_stack
+naive_norm_3harms <- naive_norm_stack
 boyce_naive_list_3harms <- boyce_naive_list
 
 ```
@@ -1178,5 +890,83 @@ for(i in 1:12) {
 
 mean(spearman_cor)
 sd(spearman_cor)
+
+```
+
+
+
+```{r}
+
+naive_uds <- rast(naive_pred_stack)
+
+# smaller 100 x 100 extent
+# xmin <- 30000
+# xmax <- 32500
+# ymin <- -1436000
+# ymax <- -1433500
+
+# xmin <- 27500
+# xmax <- 35000
+# ymin <- -1438500
+# ymax <- -1431000
+
+# larger extent
+xmin <- round(min(buffalo_CLR_year_harmonics$x2), digits = -2)
+xmax <- round(max(buffalo_CLR_year_harmonics$x2), digits = -2)
+ymin <- round(min(buffalo_CLR_year_harmonics$y2), digits = -2)
+ymax <- round(max(buffalo_CLR_year_harmonics$y2), digits = -2)
+
+crop_extent <- ext(xmin, xmax, ymin, ymax)
+
+naive_ud_cropped <- terra::crop(naive_uds, crop_extent)
+# ext(naive_ud_cropped) <- c(xmin - xmin, 
+#                             xmax - xmin, 
+#                             ymin - ymin, 
+#                             ymax - ymin)
+
+# naive_ud_cropped_50m <- terra::aggregate(naive_ud_cropped)
+# plot(naive_ud_cropped_50m[[1]])
+
+for(i in 1:12){
+plot(naive_ud_cropped[[i]])
+points(as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month == i) %>% 
+                    dplyr::select(x1) %>% unlist()), 
+       as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month == i) %>% 
+                    dplyr::select(y1) %>% unlist()))
+}
+
+names(naive_ud_cropped) <- rep("naive_preds", 12)
+plot(naive_ud_cropped)
+
+writeRaster(naive_ud_cropped, "mapping/naive_pred_stack_unnorm_yearly_2harms_ndvi2_canopy2_herby_wet_20230530.tif")
+
+```
+
+
+
+```{r}
+# cross-validation with Boyce index
+
+boyce_naive_cropped_list <- vector(mode = "list", length = 24)
+
+for(i in 1:12) {
+
+buffalo_obs <- buffalo_CLR_year_harmonics %>% 
+  filter(y == 1 & month == i) %>% 
+  transmute(x = x1, y = y1)
+
+naive_raster <- raster(naive_ud_cropped[[i]])
+boyce_naive <- ecospat.boyce2(naive_raster, buffalo_obs,
+                              method = "spearman"
+                              # method = "pearson",
+                              # method = "kendall"
+                              )
+
+boyce_naive
+boyce_naive_cropped_list[[i]] <- boyce_naive
+}
+
 
 ```

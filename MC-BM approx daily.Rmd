@@ -7,6 +7,8 @@ editor_options:
   chunk_output_type: inline
 ---
 
+# Considering daily rhythmic behaviour in telemetry data improves buffalo management strategy
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -16,6 +18,9 @@ knitr::opts_chunk$set(echo = TRUE)
 Setting up the parameters
 
 ```{r}
+
+library(terra)
+library(tictoc)
 
 # hourly_coefs_2harms_quads <- read_csv("outputs/daily_harmonic_coefs_df_with_movement_params_ndvi_canopy_herby_quads_20230524.csv")
 hourly_coefs_2harms_quads <- read_csv("outputs/daily_2harmonic_coefs_df_ndvi_canopy_herby_quads_wet_20230524.csv")
@@ -28,7 +33,12 @@ hourly_coefs <- hourly_coefs_2harms_quads
 
 ```{r}
 
-naive_ud <- terra::rast("mapping/naive_pred_stack_daily_2harms_ndvi2_canopy2_herby_wet_20230524.tif")
+# normalised
+# naive_ud <- terra::rast("mapping/naive_pred_stack_daily_2harms_ndvi2_canopy2_herby_wet_20230524.tif")
+# unnormalised
+naive_ud <- terra::rast("mapping/naive_pred_stack_unnorm_daily_2harms_ndvi2_canopy2_herby_wet_20230525.tif")
+global(naive_ud[[i]], fun = "sum", na.rm = TRUE)
+
 plot(naive_ud)
 # y_ext <- terra::ext(resources[[1]])[4] - terra::ext(resources[[1]])[3]
 # terra::ext(resources) <- c(0, 60000, 0, 57000)
@@ -39,17 +49,17 @@ xmax <- 32500
 ymin <- -1436000
 ymax <- -1433500
 
-# smaller 100 x 100 extent
-xmin <- 30000
-xmax <- 32500
-ymin <- -1436000
-ymax <- -1433500
-
-# larger extent
-xmin <- 17500
-xmax <- 40000
-ymin <- -1445000
-ymax <- -1427500
+# # smaller 100 x 100 extent
+# xmin <- 30000
+# xmax <- 32500
+# ymin <- -1436000
+# ymax <- -1433500
+# 
+# # larger extent
+# xmin <- 17500
+# xmax <- 40000
+# ymin <- -1445000
+# ymax <- -1427500
 
 crop_extent <- ext(xmin, xmax, ymin, ymax)
 
@@ -62,26 +72,66 @@ ext(naive_ud_cropped) <- c(xmin - xmin,
 # naive_ud_cropped_50m <- terra::aggregate(naive_ud_cropped)
 # plot(naive_ud_cropped_50m[[1]])
 
-plot(naive_ud_cropped[[1]])
+global(naive_ud_cropped[[i]], fun = "sum", na.rm = TRUE)
+
 i = 1
+plot(naive_ud_cropped[[i]])
 points(as.numeric(buffalo_CLR_year %>% 
                     filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
-                    dplyr::select(x1) %>% unlist()), 
+                    dplyr::select(x1) %>% unlist()) - xmin, 
        as.numeric(buffalo_CLR_year %>% 
                     filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
-                    dplyr::select(y1) %>% unlist()))
+                    dplyr::select(y1) %>% unlist()) - ymin)
 
 for(i in 1:24){
 plot(naive_ud_cropped[[i]])
 points(as.numeric(buffalo_CLR_year %>% 
                     filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
-                    dplyr::select(x1) %>% unlist()), 
+                    dplyr::select(x1) %>% unlist()) - xmin, 
        as.numeric(buffalo_CLR_year %>% 
                     filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
-                    dplyr::select(y1) %>% unlist()))
+                    dplyr::select(y1) %>% unlist()) - ymin)
 }
 
 ```
+
+```{r}
+
+naive_ud_cropped_df_list <- vector(mode = "list", length = 24)
+
+# for(i in 1:24) naive_ud_cropped_df_list[[i]] <- as.data.frame(naive_ud_cropped[[i]], xy = TRUE)
+
+naive_ud_cropped_df <- as.data.frame(naive_ud_cropped, xy = TRUE)
+
+min(naive_ud_cropped_df[,3:26], na.rm = TRUE) # 0.00000001185235
+max(naive_ud_cropped_df[,3:26], na.rm = TRUE) # 0.0000006519935
+
+
+for(i in 1:24) {
+  
+plot <- ggplot() +
+  geom_raster(data = naive_ud_cropped_df_list[[i]], aes(x = x, y = y, fill = mean)) +
+  geom_point(data = buffalo_CLR_year_harmonics %>% 
+               filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)), 
+             aes(x = x1, y = y1), colour = "red", size = 0.5) +
+  coord_equal() +
+  scale_x_continuous(limits = c(xmin, xmax )) + # - xmin
+  scale_y_continuous(limits = c(ymin, ymax )) + # - ymin
+  scale_fill_viridis_c("Habitat suitability", option = "D", direction = 1) +
+  # , limits = c(0.00000001185235, 0.0000006519935)
+  # scale_fill_distiller("Habitat suitability", palette = "Reds", direction = 1) +
+  ggtitle(paste0("Hour ", i)) +
+  theme_classic() +
+  theme(legend.position = "right")
+
+print(plot)
+
+# ggsave(paste0("outputs/plots/hourly_preds/hourly_preds_", i, "_20230525.png"), width=150, height=90, units="mm", dpi = 300)
+
+}
+
+```
+
 
 
 
@@ -89,13 +139,19 @@ points(as.numeric(buffalo_CLR_year %>%
 
 n_proposals <- 100
 grid_res <- terra::res(naive_ud_cropped)[1]
+rows <- terra::nrow(naive_ud_cropped)
+cols <- terra::ncol(naive_ud_cropped)
 
-ud_norm_list <- vector(mode = "list", length = 24)
+ud_template <- as.data.frame(ud_norm_list[[1]], xy = TRUE)
+ud_template$mean <- NULL
+
+ud_norm_list <- vector(mode = "list", length = 25)
 ud_norm_list[[1]] <- naive_ud_cropped[[1]] # initialise the first UD to start with
 
+tic()
 for(i in 1:25) {
   
-  # i = 1
+  i = 2
 
 # von mises isn't considered as the turning angle is assumed to be uniform
 # ta <- as.numeric(Rfast::rvonmises(n_proposals, m = pi, k = monthly_coefs$kappa[month_n]) - pi) 
@@ -104,48 +160,106 @@ for(i in 1:25) {
 
 # hist(ta, breaks = 50)
 # hist(sl, breaks = 50)
-rows <- terra::nrow(naive_ud_cropped)
-cols <- terra::ncol(naive_ud_cropped)
 
 #######
 
 ud_updated <- matrix(NA, nrow = rows, ncol = cols)
 
-for(x_current in 1:box_width) {
-  for(y_current in 1:box_height) {
+tic()
+for(x_current in 1:cols) {
+  for(y_current in 1:rows) {
     
-    # x_current <- 1
-    # y_current <- 2
+    # x_current <- 2
+    # y_current <- 99
     
+    # tic()
     ta <- runif(n_proposals, min = -pi, max = pi)
-    sl <- rgamma(n_proposals, shape = hourly_coefs$shape[1], scale = hourly_coefs$scale[1])
+    sl <- rgamma(n_proposals, shape = hourly_coefs$shape[i], scale = hourly_coefs$scale[i])
+    # toc()
     
+    # tic()
     matrix_row = rows - y_current + 1
     matrix_col = x_current
+    # toc()
     
+    # tic()
     x_proposal <- ((-(grid_res/2) + x_current * grid_res) + sl * sin(ta)) %% ext(naive_ud_cropped[[1]])[2] 
     y_proposal <- ((-(grid_res/2) + y_current * grid_res) + sl * cos(ta)) %% ext(naive_ud_cropped[[1]])[4]
+    # toc()
     
-    ud_updated[matrix_row, matrix_col] <- as.numeric(terra::extract(ud_norm_list[[i]], 
-                                                                cbind((-(grid_res/2) + y_current * grid_res), 
-                                                                      (-(grid_res/2) + x_current * grid_res)))) * 
-      mean(terra::extract(naive_ud_cropped[[i]], 
+    # tic()
+    ud_updated[matrix_row, matrix_col] <-
+    # ud_updated[x_current, y_current] <- 
+      
+      # as.numeric(terra::extract(ud_norm_list[[i]],
+      #                           cbind((-(grid_res/2) + y_current * grid_res),
+      #                                 (-(grid_res/2) + x_current * grid_res)))) *
+      
+      mean(terra::extract(naive_ud_cropped[[i + 1]], # take the z values from the next time point
                           cbind(x_proposal, y_proposal))[,1], na.rm = TRUE)
-
+    # toc()
+    
   }
 }
+toc()
 
 #######
 
-ud_norm_list[[i]] <- ud_updated/sum(ud_updated)  # normalise the UD
+# exp(beta * Z(x))
+# ud_norm_list[[i]] 
+# global(ud_norm_list[[i]], fun = "sum")
+
+# ud_template$value <- NULL
+# ud_template_mat <- ud_template
+
+# exp(beta * Z(z)) * psi(.) dz
+# ud_updated/sum(ud_updated) # only makes 100 x 100 raster with resolution of 1
+# ud_template$value <- as.vector(ud_updated/sum(ud_updated, na.rm = TRUE))
+ud_template$value <- as.vector(ud_updated)
+# plot(terra::rast(ud_template))
+plot(terra::rev(rast(ud_template)))
+# points(x_proposal, y_proposal)
+# max(ud_template$value, na.rm = TRUE)
+
+# exp(beta * Z(x)) * exp(beta * Z(z)) * psi(.) dz
+u_x_unnorm <- ud_norm_list[[i]] * terra::rev(rast(ud_template))
+plot(u_x_unnorm)
+u_x <- u_x_unnorm / as.numeric(terra::global(u_x_unnorm, fun = "sum", na.rm = TRUE))
+plot(u_x)
+ud_norm_list[[i + 1]] <- u_x 
+
+# ud_norm_list[[i + 1]] <- terra::rast(ud_updated/sum(ud_updated))  # normalise the UD and convert to a raster
 # image(ud_updated)
 # plot(naive_ud_cropped[[1]])
-plot(terra::rast(ud_norm_list[[i]]))
+plot(ud_norm_list[[i + 1]])
 # plot(terra::rast(ud_norm2))
+points(as.numeric(buffalo_CLR_year_harmonics %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+                    dplyr::select(x1) %>% unlist()) - xmin, 
+       as.numeric(buffalo_CLR_year_harmonics %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+                    dplyr::select(y1) %>% unlist())  - ymin)
 
 }
+toc()
 
-terra::writeRaster(terra::rast(ud_norm_list), "mapping/MC-BM_approx_preds_20230524.tif")
+# plot(ud_norm_list[[1]])
+# plot(ud_norm_list[[2]])
+# plot(ud_norm_list[[3]])
+# plot(ud_norm_list[[4]])
+# plot(ud_norm_list[[5]])
+
+for(i in 1:25) {
+  plot(ud_norm_list[[i]])
+  points(as.numeric(buffalo_CLR_year_harmonics %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i-1)) %>% 
+                    dplyr::select(x1) %>% unlist()) - xmin, 
+         as.numeric(buffalo_CLR_year_harmonics %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i-1)) %>% 
+                    dplyr::select(y1) %>% unlist())  - ymin)
+}
+
+terra::writeRaster(terra::rast(ud_norm_list), "mapping/MC-BM_approx_preds_20230525.tif")
 save.image("MC-BM_approx_preds_20230524.RData")
 
 ```

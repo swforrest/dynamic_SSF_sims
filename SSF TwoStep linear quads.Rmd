@@ -1,0 +1,574 @@
+---
+title: "SSF CLR fitting and prediction"
+author: "Scott Forrest"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+Import packages
+
+```{r message = FALSE}
+
+options(scipen=999)
+
+# install.packages("forecast")
+# install.packages("TwoStepCLogit")
+
+library(tidyverse)
+
+packages <- c("amt", "lubridate", "mgcv", "survival", "terra", "raster", "tictoc", 
+              "RColorBrewer", "patchwork", "ecospat", "ggmap", "basemaps", "mapedit", 
+              "sf", "ggpubr", "circular", "forecast", "TwoStepCLogit")
+
+walk(packages, require, character.only = T)
+
+```
+
+Without the harmonic terms to have a comparison against the daily harmonic models
+
+```{r two harmonics}
+
+formula_twostep <- y ~ 
+  
+  ndvi_scaled +
+  ndvi_2 +
+  canopy_scaled +
+  canopy_2 +
+  herby_scaled +
+  sl +
+  log_sl +
+  cos_ta +
+  
+  strata(step_id) +
+  cluster(id)
+
+```
+
+Fitting the model
+
+```{r twostep model fit}
+
+month_no <- 3
+buffalo_model_data <- buffalo_CLR_year_harmonics %>% dplyr::filter(month == month_no)
+
+months_wet <- c(1:4, 11, 12)
+buffalo_model_data_wet <- buffalo_CLR_year_harmonics %>% dplyr::filter(month %in% months_wet)
+buffalo_model_data_dry <- buffalo_CLR_year_harmonics %>% dplyr::filter(!month %in% months_wet)
+
+tic()
+model_twostep <- Ts.estim(formula = formula_twostep,
+         data = buffalo_model_data_wet,
+         all.m.1 = TRUE,
+         D = "UN(1)",
+         itermax = 10000) # default = 2000
+toc()
+
+model_twostep_linear_quads_wet <- model_twostep
+
+```
+
+Summary of model fit
+
+```{r two step summary}
+
+model_twostep
+# summary(model_twostep)
+# print(model_twostep)
+
+```
+
+Reconstructing the Gamma and von Mises distributions from the tentative distributions (from Fieberg et al 2021: Appendix C)
+
+```{r}
+
+# for individuals
+# movement_parameters <- read_csv("outputs/buffalo_parametric_indv_movement_params_20230208.csv")
+# movement_parameters_year <- movement_parameters %>% filter(id %in% buffalo_year_ids)
+
+# for the population
+# gamma$params$shape # 0.438167
+# gamma$params$scale # 534.3507
+# vonmises$params$kappa # 0.1848126
+
+tentative_shape <- 0.438167
+tentative_scale <- 534.3507
+tentative_kappa <- 0.1848126
+
+updated_shape <- tentative_shape + model_twostep$beta[which(names(model_twostep$beta) == "log_sl")]
+updated_scale <- 1/((1/tentative_scale) - model_twostep$beta[which(names(model_twostep$beta) == "sl")])
+updated_kappa <- tentative_kappa + model_twostep$beta[which(names(model_twostep$beta) == "cos_ta")]
+
+```
+
+
+
+```{r}
+
+coefs <- unique(hourly_coefs_2harms_quads_long$coef)
+# coef_titles <- c("NDVI", "Slope", "Herbaceous vegetation", "Canopy cover", "Step length", "log(Step length)", "cos(Turning angle)")
+
+ggplot() +
+    geom_path(data = hourly_coefs_2harms_quads_long %>%
+                filter(coef %in% unique(hourly_coefs_2harms_quads_long$coef)[1:4]),
+              aes(x = hour, y = value, colour = coef)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    scale_y_continuous(expression(Time-varying~parameter~values~beta)) +
+    scale_x_continuous("Hour of the day") +
+    scale_color_discrete("Estimate") +
+    # ggtitle(coef_titles[i]) +
+    theme_classic() +
+    theme(legend.position = "bottom")
+
+# ggsave(paste("outputs/plots/clr_fitting/clr_3harmonics_all_quads_20230519.png", sep = ""),
+#   width=150, height=90, units="mm", dpi = 300)
+# ggsave(paste("outputs/plots/clr_fitting/clr_harmonic_all_pres_20230208.png", sep = ""),
+#   width=300, height=180, units="mm", dpi = 300)
+
+ggplot() +
+    geom_path(data = hourly_coefs_2harms_quads_long %>% 
+                filter(coef %in% unique(hourly_coefs_2harms_quads_long$coef)[c(8,10)]), 
+              aes(x = hour, y = value, colour = coef)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    scale_y_continuous(expression(beta)) +
+    # scale_x_continuous(breaks = 0:24) +
+    scale_color_discrete("Estimate") +
+    # ggtitle(coef_titles[i]) +
+    theme_classic() +
+    theme(legend.position = "bottom")
+
+ggplot() +
+    geom_path(data = hourly_coefs_2harms_quads_long %>% 
+                filter(coef %in% unique(hourly_coefs_2harms_quads_long$coef)[9]), 
+              aes(x = hour, y = value, colour = coef)) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    scale_y_continuous(expression(beta)) +
+    # scale_x_continuous(breaks = 0:24) +
+    scale_color_discrete("Estimate") +
+    # ggtitle(coef_titles[i]) +
+    theme_classic() +
+    theme(legend.position = "bottom")
+
+```
+
+
+
+
+```{r}
+
+x <- seq(0, 1000, length = 500)
+
+# with tentative parameters
+plot(x, dgamma(x, shape = tentative_shape, scale = tentative_scale), type = "l")
+
+temporal_movement_params <- hourly_coefs_2harms_quads %>% dplyr::select(c("hour", "shape", "scale", "kappa"))
+# write_csv(temporal_movement_params, "outputs/temporal_movement_params_CLR_20230210.csv")
+
+ggplot() +
+  stat_function(fun = dgamma, args = list(shape = tentative_shape, scale = tentative_scale)) +
+  scale_x_continuous(limits = c(0,1000), breaks = seq(0,1000,100)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme_classic()
+
+# subset <- temporal_movement_params %>% filter(month < 1)
+
+# ggplot(subset) +
+#   stat_function(fun = dgamma, args = list(shape = shape, scale = scale)) +
+#   scale_x_continuous(limits = c(0,1000), breaks = seq(0,1000,100)) +
+#   geom_hline(yintercept = 0, linetype = "dashed") +
+#   theme_classic()
+
+```
+
+
+# Generating predictions
+
+Use the habitat layer script to import habitat layers
+
+# Predictions and cross-validation
+
+Boyce index function
+
+```{r}
+
+ecospat.boyce2 <- function (fit, obs, nclass = 0, window.w = "default", res = 100, 
+  PEplot = TRUE, rm.duplicate = TRUE, method = "spearman") 
+{
+  boycei <- function(interval, obs, fit) {
+    pi <- sum(as.numeric(obs >= interval[1] & obs <= interval[2]))/length(obs)
+    ei <- sum(as.numeric(fit >= interval[1] & fit <= interval[2]))/length(fit)
+    return(round(pi/ei, 10))
+  }
+  if (inherits(fit, "RasterLayer")) {
+    if (is.data.frame(obs) || is.matrix(obs)) {
+      obs <- raster::extract(fit, obs)
+    }
+    fit <- getValues(fit)
+    fit <- fit[!is.na(fit)]
+    obs <- obs[!is.na(obs)]
+  }
+  mini <- min(fit, obs)
+  maxi <- max(fit, obs)
+  if (length(nclass) == 1) {
+    if (nclass == 0) {
+      if (window.w == "default") {
+        window.w <- (max(fit) - min(fit))/10
+      }
+      vec.mov <- seq(from = mini, to = maxi - window.w, 
+        by = (maxi - mini - window.w)/res)
+      vec.mov[res + 1] <- vec.mov[res + 1] + 1
+      interval <- cbind(vec.mov, vec.mov + window.w)
+    }
+    else {
+      vec.mov <- seq(from = mini, to = maxi, by = (maxi - 
+        mini)/nclass)
+      interval <- cbind(vec.mov, c(vec.mov[-1], maxi))
+    }
+  }
+  else {
+    vec.mov <- c(mini, sort(nclass[!nclass > maxi | nclass < 
+      mini]))
+    interval <- cbind(vec.mov, c(vec.mov[-1], maxi))
+  }
+  f <- apply(interval, 1, boycei, obs, fit)
+  to.keep <- which(f != "NaN")
+  f <- f[to.keep]
+  if (length(f) < 2) {
+    b <- NA
+  }
+  else {
+    r <- 1:length(f)
+    if (rm.duplicate == TRUE) {
+      r <- c(1:length(f))[f != c(f[-1], TRUE)]
+    }
+    b <- cor(f[r], vec.mov[to.keep][r], method = method)
+  }
+  HS <- apply(interval, 1, sum)/2
+  if (length(nclass) == 1 & nclass == 0) {
+    HS[length(HS)] <- HS[length(HS)] - 1
+  }
+  HS <- HS[to.keep]
+  if (PEplot == TRUE) {
+    plot(HS, f, xlab = "Habitat suitability", ylab = "Predicted/Expected ratio", 
+      col = "grey", cex = 0.75)
+    points(HS[r], f[r], pch = 19, cex = 0.75)
+  }
+  return(list(F.ratio = f, cor = round(b, 3), HS = HS))
+}
+
+```
+
+Naive approach
+
+```{r}
+
+# naive_pred_stack <- c()
+# boyce_naive_list <- vector(mode = "list", length = 24)
+
+# for(i in 1:24) {
+  
+  # i = 24
+
+# resources <- c(ndvi_stack_scaled[[12 + month_no]], 
+#                canopy_scaled,
+#                herby_scaled)
+
+resources <- c(ndvi_mean_wet,
+               canopy_scaled_cropped,
+               herby_scaled_cropped)
+
+# ndvi
+ndvi_lin <- resources[[1]]
+ndvi_lin <- ndvi_lin * model_twostep$beta[which(names(model_twostep$beta) == "ndvi_scaled")]
+plot(ndvi_lin)
+
+ndvi_quad <- resources[[1]]
+ndvi_quad <- (ndvi_quad ^ 2) * model_twostep$beta[which(names(model_twostep$beta) == "ndvi_2")]
+plot(ndvi_quad)
+
+ndvi_pred <- ndvi_lin  + ndvi_quad
+plot(ndvi_pred)
+plot(resources[[1]])
+
+# canopy cover 
+canopy_lin <- resources[[2]]
+canopy_lin <- canopy_lin * model_twostep$beta[which(names(model_twostep$beta) == "canopy_scaled")]
+plot(canopy_lin)
+
+canopy_quad <- resources[[2]]
+canopy_quad <- (canopy_quad ^ 2) * model_twostep$beta[which(names(model_twostep$beta) == "canopy_2")]
+plot(canopy_quad)
+
+canopy_pred <- canopy_lin + canopy_quad
+plot(canopy_pred)
+plot(resources[[2]])
+
+# herbaceous vegetation
+herby_lin <- resources[[3]]
+herby_lin <- herby_lin * model_twostep$beta[which(names(model_twostep$beta) == "herby_scaled")]
+plot(herby_lin)
+plot(resources[[3]])
+
+# combining
+naive_pred <- exp(ndvi_pred + canopy_pred + herby_lin) / global(exp(ndvi_pred + canopy_pred + herby_lin), fun = "sum", na.rm = TRUE)[[1]]
+plot(naive_pred)
+plot(naive_pred)
+points(as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month == month_no) %>% 
+                    dplyr::select(x1) %>% unlist()), 
+       as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month == month_no) %>% 
+                    dplyr::select(y1) %>% unlist()))
+
+# naive_pred_stack <- c(naive_pred_stack, naive_pred)
+
+# setting up the buffalo observation data for the relevant month
+
+# buffalo_obs <- buffalo_CLR_year %>% 
+#   filter(y == 1 & month == 1 & x1 > xmin & x1 < xmax & y1 > ymin & y1 < ymax) %>% 
+#   transmute(x = x1 - xmin, y = y1 - ymin)
+
+buffalo_obs <- buffalo_CLR_year_harmonics %>% 
+  filter(y == 1 &  month %in% months_wet) %>% 
+  transmute(x = x1, y = y1)
+
+naive_raster <- raster(naive_pred)
+# naive_raster <- raster(naive_pred_cropped)
+
+# plot(naive_pred)
+# plot(naive_raster)
+
+# plot(naive_cropped_raster[[1]])
+
+# boyce_naive <- ecospat.boyce2(naive_cropped_raster[[1]], buffalo_obs,
+#                               # method = "spearman"
+#                               method = "pearson",
+#                               # method = "kendall"
+#                               )
+
+boyce_naive_allhours <- ecospat.boyce2(naive_raster, buffalo_obs,
+                              method = "spearman"
+                              # method = "pearson",
+                              # method = "kendall"
+                              )
+
+boyce_naive_allhours
+
+# }
+
+# naive_raster_2harms <- naive_raster
+# boyce_naive_list_2harms <- boyce_naive_list
+
+# naive_raster_daily_2harms_quads <- naive_raster
+# boyce_naive_raster_daily_2harms_quads <- boyce_naive_list
+
+```
+
+
+```{r}
+
+naive_pred_linear_df <- as.data.frame(naive_pred, xy = TRUE)
+
+# smaller 100 x 100 extent
+xmin <- 27500
+xmax <- 35000
+ymin <- -1438500
+ymax <- -1431000
+
+crop_extent <- ext(xmin, xmax, ymin, ymax)
+naive_pred_cropped <- terra::crop(naive_pred, crop_extent)
+# ext(naive_ud_cropped) <- c(xmin - xmin, 
+#                             xmax - xmin, 
+#                             ymin - ymin, 
+#                             ymax - ymin)
+
+
+naive_pred_linear_cropped_df <- as.data.frame(naive_pred_cropped, xy = TRUE)
+
+for(i in 1:24) {
+  
+plot <- ggplot() +
+  geom_raster(data = naive_pred_linear_cropped_df, aes(x = x, y = y, fill = mean)) +
+  geom_point(data = buffalo_CLR_year_harmonics %>% 
+               filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)), 
+             aes(x = x1, y = y1), colour = "red", size = 0.5) +
+  coord_equal() +
+  scale_x_continuous(limits = c(xmin, xmax )) + # - xmin
+  scale_y_continuous(limits = c(ymin, ymax )) + # - ymin
+  scale_fill_viridis_c("Habitat suitability", option = "D", direction = 1) +
+  # , limits = c(0.00000001185235, 0.0000006519935)
+  # scale_fill_distiller("Habitat suitability", palette = "Reds", direction = 1) +
+  ggtitle(paste0("Hour ", i)) +
+  theme_classic() +
+  theme(legend.position = "right")
+
+print(plot)
+
+ggsave(paste0("outputs/plots/hourly_preds/hourly_preds_allhours_", i, "_20230525.png"), width=150, height=90, units="mm", dpi = 300)
+
+}
+
+```
+
+
+
+```{r}
+
+# for(i in 1:24) {
+#   plot(naive_pred_stack[[i]])
+# }
+# 
+# for(i in 1:24) {
+#   # plot(naive_pred_stack[[i]])
+#   plot(naive_pred_stack[[i]])
+#   points(as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == month_no & hour == ifelse(i == 24, 0, i)) %>% dplyr::select(x1) %>% unlist()), 
+#        as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == month_no & hour == ifelse(i == 24, 0, i)) %>% dplyr::select(y1) %>% unlist()))
+# }
+
+```
+
+
+```{r}
+
+# spearman_cor <- c()
+# 
+# for(i in 1:24) {
+#   print(boyce_naive_list[[i]]$cor)
+#   spearman_cor[i] <- boyce_naive_list[[i]]$cor
+# }
+# 
+# mean(spearman_cor)
+# sd(spearman_cor)
+
+```
+
+Subsetting the spatial extent to predict over
+
+```{r}
+
+# finding the minimum and maximum extent (using the pseudo-absences as a buffer around the points)
+
+buffalo_CLR_year_harmonics %>% dplyr::summarise(xmin = min(x2), xmax = max(x2),
+                                                ymin = min(y2), ymax = max(y2))
+
+buffalo_CLR_year_harmonics %>% dplyr::summarise(xmin = min(x1), xmax = max(x1),
+                                                ymin = min(y1), ymax = max(y1))
+
+subset_extent <- terra::ext(round(min(buffalo_CLR_year_harmonics$x2), digits = - 2), round(max(buffalo_CLR_year_harmonics$x2), digits = - 2),
+           round(min(buffalo_CLR_year_harmonics$y2), digits = - 2), round(max(buffalo_CLR_year_harmonics$y2), digits = - 2))
+
+resources_cropped <- terra::crop(resources, subset_extent)
+plot(resources_cropped)
+plot(resources_cropped[[1]])
+points(as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1) %>% 
+                    dplyr::select(x1) %>% unlist()), 
+       as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1) %>% 
+                    dplyr::select(y1) %>% unlist()))
+
+```
+
+Naive approach
+
+```{r}
+
+# naive_pred_stack <- c()
+# boyce_naive_list <- vector(mode = "list", length = 24)
+
+# for(i in 1:24) {
+
+# ndvi
+ndvi_lin <- resources_cropped[[1]]
+ndvi_lin <- ndvi_lin * model_twostep$beta[which(names(model_twostep$beta) == "ndvi_scaled")]
+plot(ndvi_lin)
+
+ndvi_quad <- resources_cropped[[1]]
+ndvi_quad <- (ndvi_quad ^ 2) * model_twostep$beta[which(names(model_twostep$beta) == "ndvi_2")]
+plot(ndvi_quad)
+
+ndvi_pred <- ndvi_lin  + ndvi_quad
+plot(ndvi_pred)
+plot(resources_cropped[[1]])
+
+# canopy cover 
+canopy_lin <- resources_cropped[[2]]
+canopy_lin <- canopy_lin * model_twostep$beta[which(names(model_twostep$beta) == "canopy_scaled")]
+plot(canopy_lin)
+
+canopy_quad <- resources_cropped[[2]]
+canopy_quad <- (canopy_quad ^ 2) * model_twostep$beta[which(names(model_twostep$beta) == "canopy_2")]
+plot(canopy_quad)
+
+canopy_pred <- canopy_lin + canopy_quad
+plot(canopy_pred)
+plot(resources_cropped[[2]])
+
+# herbaceous vegetation
+herby_lin <- resources_cropped[[3]]
+herby_lin <- herby_lin * model_twostep$beta[which(names(model_twostep$beta) == "herby_scaled")]
+plot(herby_lin)
+plot(resources_cropped[[3]])
+
+# combining
+naive_pred <- exp(ndvi_pred + canopy_pred + herby_lin) / global(exp(ndvi_pred + canopy_pred + herby_lin), fun = "sum", na.rm = TRUE)[[1]]
+plot(naive_pred)
+plot(naive_pred)
+points(as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month == month_no) %>% 
+                    dplyr::select(x1) %>% unlist()), 
+       as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month == month_no) %>% 
+                    dplyr::select(y1) %>% unlist()))
+
+# naive_pred_stack <- c(naive_pred_stack, naive_pred)
+
+# setting up the buffalo observation data for the relevant month
+
+# buffalo_obs <- buffalo_CLR_year %>% 
+#   filter(y == 1 & month == 1 & x1 > xmin & x1 < xmax & y1 > ymin & y1 < ymax) %>% 
+#   transmute(x = x1 - xmin, y = y1 - ymin)
+
+buffalo_obs <- buffalo_CLR_year %>% 
+  filter(y == 1 & month == month_no) %>% 
+  transmute(x = x1, y = y1)
+
+naive_raster <- raster(naive_pred)
+# naive_raster <- raster(naive_pred_cropped)
+
+# plot(naive_pred)
+# plot(naive_raster)
+
+# plot(naive_cropped_raster[[1]])
+
+# boyce_naive <- ecospat.boyce2(naive_cropped_raster[[1]], buffalo_obs,
+#                               # method = "spearman"
+#                               method = "pearson",
+#                               # method = "kendall"
+#                               )
+
+boyce_naive <- ecospat.boyce2(naive_raster, buffalo_obs,
+                              method = "spearman"
+                              # method = "pearson",
+                              # method = "kendall"
+                              )
+
+boyce_naive
+
+# boyce_naive_list[[i]] <- boyce_naive
+
+# }
+
+# naive_raster_2harms <- naive_raster
+# boyce_naive_list_2harms <- boyce_naive_list
+
+# naive_raster_daily_2harms_quads <- naive_raster
+# boyce_naive_raster_daily_2harms_quads <- boyce_naive_list
+
+```

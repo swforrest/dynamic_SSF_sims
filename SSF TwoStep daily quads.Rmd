@@ -1134,6 +1134,7 @@ Naive approach
 # naive_raster <- raster(naive_pred_50m)
 
 naive_pred_stack <- c()
+naive_pred_norm_stack <- c()
 boyce_naive_list <- vector(mode = "list", length = 24)
 
 for(i in 1:24) {
@@ -1160,7 +1161,7 @@ ndvi_lin <- resources[[1]] * hourly_coefs_2harms_quads$ndvi[[which(hourly_coefs_
 ndvi_quad <- (resources[[1]] ^ 2) * hourly_coefs_2harms_quads$ndvi_quad[[which(hourly_coefs_2harms_quads$hour == i)]]
 # plot(ndvi_quad)
 ndvi_pred <- ndvi_lin  + ndvi_quad
-plot(ndvi_pred)
+# plot(ndvi_pred)
 
 # canopy cover 
 canopy_lin <- resources[[2]] * hourly_coefs_2harms_quads$canopy[[which(hourly_coefs_2harms_quads$hour == i)]]
@@ -1168,27 +1169,29 @@ canopy_lin <- resources[[2]] * hourly_coefs_2harms_quads$canopy[[which(hourly_co
 canopy_quad <- (resources[[2]] ^ 2) * hourly_coefs_2harms_quads$canopy_quad[[which(hourly_coefs_2harms_quads$hour == i)]]
 # plot(canopy_quad)
 canopy_pred <- canopy_lin + canopy_quad
-plot(canopy_pred)
+# plot(canopy_pred)
 
 # herby
 herby_lin <- resources[[3]]
 herby_pred <- herby_lin * hourly_coefs_2harms_quads$herby[[which(hourly_coefs_2harms_quads$hour == i)]]
-plot(herby_pred)
+# plot(herby_pred)
 
 # combining
-naive_pred <- exp(ndvi_pred + canopy_pred + herby_pred) / 
-  global(exp(ndvi_pred + canopy_pred + herby_pred), fun = "sum", na.rm = TRUE)[[1]]
+naive_pred <- exp(ndvi_pred + canopy_pred + herby_pred)
+naive_pred_norm <- naive_pred / 
+  global(naive_pred, fun = "sum", na.rm = TRUE)[[1]]
 
 plot(naive_pred)
-plot(naive_pred)
-points(as.numeric(buffalo_CLR_year %>% 
-                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
-                    dplyr::select(x1) %>% unlist()), 
-       as.numeric(buffalo_CLR_year %>% 
-                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+plot(naive_pred_norm)
+points(as.numeric(buffalo_CLR_year %>%
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>%
+                    dplyr::select(x1) %>% unlist()),
+       as.numeric(buffalo_CLR_year %>%
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>%
                     dplyr::select(y1) %>% unlist()))
 
 naive_pred_stack <- c(naive_pred_stack, naive_pred)
+naive_pred_norm_stack <- c(naive_pred_norm_stack, naive_pred_norm)
 
 # setting up the buffalo observation data for the relevant month
 
@@ -1200,7 +1203,7 @@ buffalo_obs <- buffalo_CLR_year_harmonics %>%
   filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
   transmute(x = x1, y = y1)
 
-naive_raster <- raster(naive_pred)
+naive_raster <- raster(naive_pred_norm)
 # naive_raster <- raster(naive_pred_cropped)
 
 # plot(naive_pred)
@@ -1229,10 +1232,12 @@ boyce_naive_list[[i]] <- boyce_naive
 # naive_raster_2harms <- naive_raster
 # boyce_naive_list_2harms <- boyce_naive_list
 
-naive_raster_daily_2harms_quads_w_herby_wet <- naive_pred_stack
+naive_daily_2harms_quads_w_herby_wet <- naive_pred_stack
+naive_norm_daily_2harms_quads_w_herby_wet <- naive_pred_norm_stack
+
 boyce_naive_raster_daily_2harms_quads_w_herby_wet <- boyce_naive_list
 
-# terra::writeRaster(rast(naive_pred_stack), "mapping/naive_pred_stack_daily_2harms_ndvi2_canopy2_herby_wet_20230524.tif")
+terra::writeRaster(rast(naive_pred_stack), "mapping/naive_pred_stack_unnorm_daily_2harms_ndvi2_canopy2_herby_wet_20230525.tif")
 
 ```
 
@@ -1264,6 +1269,82 @@ for(i in 1:24) {
 
 mean(spearman_cor)
 sd(spearman_cor)
+
+```
+
+```{r}
+
+naive_uds <- rast(naive_pred_norm_stack)
+
+# smaller 100 x 100 extent
+xmin <- 30000
+xmax <- 32500
+ymin <- -1436000
+ymax <- -1433500
+
+# smaller 100 x 100 extent
+xmin <- 27500
+xmax <- 35000
+ymin <- -1438500
+ymax <- -1431000
+# 
+# # larger extent
+# xmin <- 17500
+# xmax <- 40000
+# ymin <- -1445000
+# ymax <- -1427500
+
+crop_extent <- ext(xmin, xmax, ymin, ymax)
+
+naive_ud_cropped <- terra::crop(naive_uds, crop_extent)
+# ext(naive_ud_cropped) <- c(xmin - xmin, 
+#                             xmax - xmin, 
+#                             ymin - ymin, 
+#                             ymax - ymin)
+
+# naive_ud_cropped_50m <- terra::aggregate(naive_ud_cropped)
+# plot(naive_ud_cropped_50m[[1]])
+
+for(i in 1:24){
+plot(naive_ud_cropped[[i]])
+points(as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+                    dplyr::select(x1) %>% unlist()), 
+       as.numeric(buffalo_CLR_year %>% 
+                    filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+                    dplyr::select(y1) %>% unlist()))
+}
+
+```
+
+
+```{r}
+# cross-validation with Boyce index
+
+boyce_naive_cropped_list <- vector(mode = "list", length = 24)
+
+for(i in 1:24) {
+  
+  # i = 1
+
+buffalo_obs <- buffalo_CLR_year_harmonics %>% 
+  filter(y == 1 & month %in% months_wet & hour == ifelse(i == 24, 0, i)) %>% 
+  transmute(x = x1, y = y1)
+
+naive_raster <- raster(naive_ud_cropped[[i]])
+
+boyce_naive <- ecospat.boyce2(naive_raster, buffalo_obs,
+                              method = "spearman"
+                              # method = "pearson",
+                              # method = "kendall"
+                              )
+
+boyce_naive
+
+boyce_naive_cropped_list[[i]] <- boyce_naive
+
+}
+
 
 ```
 
