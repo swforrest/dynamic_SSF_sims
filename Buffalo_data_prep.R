@@ -53,10 +53,35 @@ buffalo_CLR <- buffalo_data %>%
 
 # Filtering by animals that have more than a year of data
 
+# buffalo_CLR %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
+#   geom_point(alpha = 0.1) +
+#   scale_y_discrete("Buffalo ID") +
+#   scale_x_datetime("Date") +
+#   scale_colour_viridis_d() +
+#   theme_bw() +
+#   theme(legend.position = "none")
+# 
+# buffalo_CLR %>% dplyr::group_by(id) %>%  
+#   summarise(min_time = min(t1), max_time = max(t1),
+#             min_x = min(x2), max_x = max(x2),
+#             min_y = min(y2), max_y = max(y2))
+
 buffalo_year_ids <- c(2005, 2014, 2018, 2022, 2024, 2154, 2158, 2327, 2354, 2387)
 buffalo_CLR_year <- buffalo_CLR %>% filter(id %in% buffalo_year_ids)
 unique(buffalo_CLR_year$id)
 
+min(buffalo_CLR_year$t1)
+max(buffalo_CLR_year$t1)
+
+buffalo_CLR_year <- buffalo_CLR_year %>% filter(t1 < "2019-07-25 09:32:42 ACST")
+
+buffalo_CLR_year %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
+  geom_point(alpha = 0.1) +
+  scale_y_discrete("Buffalo ID") +
+  scale_x_datetime("Date") +
+  scale_colour_viridis_d() +
+  theme_bw() +
+  theme(legend.position = "none")
 
 # Aligning step ids
 
