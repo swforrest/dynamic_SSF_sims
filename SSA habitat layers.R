@@ -10,6 +10,7 @@ ndvi_projected <- rast("mapping/cropped rasters/ndvi_GEE_projected_watermask2023
 scaling_mean <- as.numeric(attributes(buffalo_CLR_year_harmonics$ndvi_scaled)[1]) # 0.3125089
 scaling_sd <- as.numeric(attributes(buffalo_CLR_year_harmonics$ndvi_scaled)[2]) # 0.143179 for July 2018
 ndvi_stack_scaled <- (ndvi_projected - scaling_mean) / scaling_sd
+terra::writeRaster(ndvi_stack_scaled, "mapping/ndvi_projected_watermask_scaled_20230612.tif", overwrite = TRUE)
 # plot(ndvi_stack_scaled)
 # time_vector <- terra::time(ndvi_projected)
 # terra::time(ndvi_stack_scaled) <- NULL
@@ -49,6 +50,12 @@ canopy_scaled <- rast("mapping/cropped rasters/canopy_scaled_by_buffalo_data_202
 # writeRaster(herby_scaled, "mapping/cropped rasters/herby_scaled_by_buffalo_data_20230210.tif")
 herby_scaled <- rast("mapping/cropped rasters/herby_scaled_by_buffalo_data_20230210.tif")
 
+# elev <- rast("mapping/cropped rasters/DEM_H_raster.tif")
+# elev_scaled <- ((elev) - attr(buffalo_CLR_year$elev_scaled, "scaled:center")) / attr(buffalo_CLR_year$elev_scaled, "scaled:scale")
+# plot(elev_scaled)
+# writeRaster(elev_scaled, "mapping/cropped rasters/elev_scaled_by_buffalo_data_20230613.tif")
+elev_scaled <- rast("mapping/cropped rasters/elev_scaled_by_buffalo_data_20230613.tif")
+
 
 # Subsetting the spatial extent to predict over
 
@@ -63,12 +70,6 @@ herby_scaled <- rast("mapping/cropped rasters/herby_scaled_by_buffalo_data_20230
 # subset_extent <- terra::ext(round(min(buffalo_CLR_year_harmonics$x2), digits = - 2), round(max(buffalo_CLR_year_harmonics$x2), digits = - 2),
 #                             round(min(buffalo_CLR_year_harmonics$y2), digits = - 2), round(max(buffalo_CLR_year_harmonics$y2), digits = - 2))
 
-subset_extent <- terra::ext(4200, 54300, -1458800, -1409700)
-
-ndvi_stack_cropped <- terra::crop(ndvi_stack_scaled, subset_extent)
-canopy_scaled_cropped <- terra::crop(canopy_scaled, subset_extent)
-herby_scaled_cropped <- terra::crop(herby_scaled, subset_extent)
-
 # plot(resources_cropped)
 # plot(resources_cropped[[1]])
 # points(as.numeric(buffalo_CLR_year %>% 
@@ -77,4 +78,33 @@ herby_scaled_cropped <- terra::crop(herby_scaled, subset_extent)
 #        as.numeric(buffalo_CLR_year %>% 
 #                     filter(y == 1) %>% 
 #                     dplyr::select(y1) %>% unlist()))
+
+ndvi_stack_scaled <- rast("mapping/ndvi_projected_watermask_scaled_20230612.tif")
+canopy_scaled <- rast("mapping/cropped rasters/canopy_scaled_by_buffalo_data_20230210.tif")
+herby_scaled <- rast("mapping/cropped rasters/herby_scaled_by_buffalo_data_20230210.tif")
+elev_scaled <- rast("mapping/cropped rasters/elev_scaled_by_buffalo_data_20230613.tif")
+
+xmin <- round(min(buffalo_CLR_year_harmonics$x2), digits = -2)
+xmax <- round(max(buffalo_CLR_year_harmonics$x2), digits = -2)
+ymin <- round(min(buffalo_CLR_year_harmonics$y2), digits = -2)
+ymax <- round(max(buffalo_CLR_year_harmonics$y2), digits = -2)
+
+crop_extent <- ext(xmin, xmax, ymin, ymax)
+# subset_extent <- terra::ext(4200, 54300, -1458800, -1409700)
+
+ndvi_stack_cropped <- terra::crop(ndvi_stack_scaled, crop_extent)
+canopy_scaled_cropped <- terra::crop(canopy_scaled, crop_extent)
+herby_scaled_cropped <- terra::crop(herby_scaled, crop_extent)
+elev_scaled_cropped <- terra::crop(elev_scaled, crop_extent)
+
+# to set the origin at (0,0)
+ext(ndvi_stack_cropped) <- c(xmin - xmin, xmax - xmin, ymin - ymin, ymax - ymin)
+ext(canopy_scaled_cropped) <- c(xmin - xmin, xmax - xmin, ymin - ymin, ymax - ymin)
+ext(herby_scaled_cropped) <- c(xmin - xmin, xmax - xmin, ymin - ymin, ymax - ymin)
+ext(elev_scaled_cropped) <- c(xmin - xmin, xmax - xmin, ymin - ymin, ymax - ymin)
+
+writeRaster(ndvi_stack_cropped, "mapping/cropped rasters/ndvi_projected_watermask_scaled_cropped_20230612.tif")
+writeRaster(canopy_scaled_cropped, "mapping/cropped rasters/canopy_scaled_cropped_by_buffalo_data_20230210.tif")
+writeRaster(herby_scaled_cropped, "mapping/cropped rasters/herby_scaled_by_buffalo_data_cropped_20230210.tif")
+writeRaster(elev_scaled_cropped, "mapping/cropped rasters/elev_scaled_by_buffalo_data_cropped_20230613.tif")
 

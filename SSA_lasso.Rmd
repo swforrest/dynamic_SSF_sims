@@ -79,198 +79,6 @@ ext(elev_cropped) <- c(xmin - xmin, xmax - xmin, ymin - ymin, ymax - ymin)
 
 ```
 
-Create the model formula with a single pair of harmonics
-
-```{r}
-
-formula_twostep <- y ~ 
-  
-  ndvi_scaled +
-  yday_s1:ndvi_scaled +
-  yday_c1:ndvi_scaled +
-  
-  ndvi_2 +
-  yday_s1:ndvi_2 +
-  yday_c1:ndvi_2 +
-  
-  canopy_scaled +
-  yday_s1:canopy_scaled +
-  yday_c1:canopy_scaled +
-  
-  canopy_2 +
-  yday_s1:canopy_2 +
-  yday_c1:canopy_2 +
-  
-  herby_scaled +
-  yday_s1:herby_scaled +
-  yday_c1:herby_scaled +
-  
-  sl +
-  yday_s1:sl +
-  yday_c1:sl +
-  
-  log_sl +
-  yday_s1:log_sl +
-  yday_c1:log_sl +
-  
-  cos_ta +
-  yday_s1:cos_ta +
-  yday_c1:cos_ta +
-  
-  strata(step_id) +
-  cluster(id)
-
-```
-
-Formula with two pairs of harmonics ~ ndvi + ndvi2 + canopy + canopy2 + herby
-
-```{r}
-
-sum(is.na(buffalo_CLR_year_harmonics$elev_log))
-min(buffalo_CLR_year_harmonics$DEM_H_end)
-
-formula_twostep <- y ~ 
-  
-  ndvi_scaled +
-  yday_s1:ndvi_scaled +
-  yday_c1:ndvi_scaled +
-  yday_s2:ndvi_scaled +
-  yday_c2:ndvi_scaled +
-  
-  ndvi_2 +
-  yday_s1:ndvi_2 +
-  yday_c1:ndvi_2 +
-  yday_s2:ndvi_2 +
-  yday_c2:ndvi_2 +
-  
-  canopy_scaled +
-  yday_s1:canopy_scaled +
-  yday_c1:canopy_scaled +
-  yday_s2:canopy_scaled +
-  yday_c2:canopy_scaled +
-  
-  canopy_2 +
-  yday_s1:canopy_2 +
-  yday_c1:canopy_2 +
-  yday_s2:canopy_2 +
-  yday_c2:canopy_2 +
-  
-  herby_scaled +
-  yday_s1:herby_scaled +
-  yday_c1:herby_scaled +
-  yday_s2:herby_scaled +
-  yday_c2:herby_scaled +
-  
-  sl +
-  yday_s1:sl +
-  yday_c1:sl +
-  yday_s2:sl +
-  yday_c2:sl +
-  
-  log_sl +
-  yday_s1:log_sl +
-  yday_c1:log_sl +
-  yday_s2:log_sl +
-  yday_c2:log_sl +
-  
-  cos_ta +
-  yday_s1:cos_ta +
-  yday_c1:cos_ta +
-  yday_s2:cos_ta +
-  yday_c2:cos_ta +
-  
-  strata(step_id) +
-  cluster(id)
-
-```
-
-Formula with two pairs of harmonics ~ ndvi + ndvi2 + canopy + canopy2 + herby + elev_scaled
-
-```{r}
-
-formula_twostep <- y ~ 
-  
-  ndvi_scaled +
-  yday_s1:ndvi_scaled +
-  yday_c1:ndvi_scaled +
-  yday_s2:ndvi_scaled +
-  yday_c2:ndvi_scaled +
-  
-  ndvi_2 +
-  yday_s1:ndvi_2 +
-  yday_c1:ndvi_2 +
-  yday_s2:ndvi_2 +
-  yday_c2:ndvi_2 +
-  
-  canopy_scaled +
-  yday_s1:canopy_scaled +
-  yday_c1:canopy_scaled +
-  yday_s2:canopy_scaled +
-  yday_c2:canopy_scaled +
-  
-  canopy_2 +
-  yday_s1:canopy_2 +
-  yday_c1:canopy_2 +
-  yday_s2:canopy_2 +
-  yday_c2:canopy_2 +
-  
-  herby_scaled +
-  yday_s1:herby_scaled +
-  yday_c1:herby_scaled +
-  yday_s2:herby_scaled +
-  yday_c2:herby_scaled +
-  
-  elev_scaled +
-  yday_s1:elev_scaled +
-  yday_c1:elev_scaled +
-  yday_s2:elev_scaled +
-  yday_c2:elev_scaled +
-  
-  elev_2 +
-  yday_s1:elev_2 +
-  yday_c1:elev_2 +
-  yday_s2:elev_2 +
-  yday_c2:elev_2 +
-  
-  sl +
-  yday_s1:sl +
-  yday_c1:sl +
-  yday_s2:sl +
-  yday_c2:sl +
-  
-  log_sl +
-  yday_s1:log_sl +
-  yday_c1:log_sl +
-  yday_s2:log_sl +
-  yday_c2:log_sl +
-  
-  cos_ta +
-  yday_s1:cos_ta +
-  yday_c1:cos_ta +
-  yday_s2:cos_ta +
-  yday_c2:cos_ta +
-  
-  strata(step_id) +
-  cluster(id)
-
-```
-
-Fitting the model
-
-```{r twostep model fit}
-
-tic()
-model_twostep <- Ts.estim(formula = formula_twostep,
-         data = buffalo_CLR_year_harmonics,
-         all.m.1 = TRUE,
-         D = "UN(1)",
-         itermax = 10000)
-toc()
-
-model_twostep
-
-```
-
 Using the lasso approach
 
 ```{r}
@@ -298,93 +106,17 @@ plot(clcvObj)
 
 ```
 
+Removing negative values from elevation
 
 ```{r}
 
-buffalo_lasso <- buffalo_data %>% mutate(
-  
-  ndvi = scale(ndvi_temporal),
-  ndvi_s1 = scale(ndvi_temporal * yday_s1),
-  ndvi_s2 = scale(ndvi_temporal * yday_s2),
-  ndvi_s3 = scale(ndvi_temporal * yday_s3),
-  ndvi_c1 = scale(ndvi_temporal * yday_c1),
-  ndvi_c2 = scale(ndvi_temporal * yday_c2),
-  ndvi_c3 = scale(ndvi_temporal * yday_c3),
-  
-  ndvi_sq = scale(ndvi_temporal ^ 2),
-  ndvi_sq_s1 = scale((ndvi_temporal ^ 2) * yday_s1),
-  ndvi_sq_s2 = scale((ndvi_temporal ^ 2) * yday_s2),
-  ndvi_sq_s3 = scale((ndvi_temporal ^ 2) * yday_s3),
-  ndvi_sq_c1 = scale((ndvi_temporal ^ 2) * yday_c1),
-  ndvi_sq_c2 = scale((ndvi_temporal ^ 2) * yday_c2),
-  ndvi_sq_c3 = scale((ndvi_temporal ^ 2) * yday_c3),
-  
-  canopy = canopy_scaled,
-  canopy_s1 = canopy_scaled * yday_s1,
-  canopy_s2 = canopy_scaled * yday_s2,
-  canopy_s3 = canopy_scaled * yday_s3,
-  canopy_c1 = canopy_scaled * yday_c1,
-  canopy_c2 = canopy_scaled * yday_c2,
-  canopy_c3 = canopy_scaled * yday_c3,
-  
-  canopy_sq = canopy_2,
-  canopy_sq_s1 = canopy_2 * yday_s1,
-  canopy_sq_s2 = canopy_2 * yday_s2,
-  canopy_sq_s3 = canopy_2 * yday_s3,
-  canopy_sq_c1 = canopy_2 * yday_c1,
-  canopy_sq_c2 = canopy_2 * yday_c2,
-  canopy_sq_c3 = canopy_2 * yday_c3,
-  
-  herby = herby_scaled,
-  herby_s1 = herby_scaled * yday_s1,
-  herby_s2 = herby_scaled * yday_s2,
-  herby_s3 = herby_scaled * yday_s3,
-  herby_c1 = herby_scaled * yday_c1,
-  herby_c2 = herby_scaled * yday_c2,
-  herby_c3 = herby_scaled * yday_c3,
-  
-  # elev = elev_scaled,
-  # elev_s1 = elev_scaled * yday_s1,
-  # elev_s2 = elev_scaled * yday_s2,
-  # elev_s3 = elev_scaled * yday_s3,
-  # elev_c1 = elev_scaled * yday_c1,
-  # elev_c2 = elev_scaled * yday_c2,
-  # elev_c3 = elev_scaled * yday_c3,
-  # 
-  # elev_2 = elev_2,
-  # elev_2_s1 = elev_2 * yday_s1,
-  # elev_2_s2 = elev_2 * yday_s2,
-  # elev_2_s3 = elev_2 * yday_s3,
-  # elev_2_c1 = elev_2 * yday_c1,
-  # elev_2_c2 = elev_2 * yday_c2,
-  # elev_2_c3 = elev_2 * yday_c3,
-  
-  step_l = sl,
-  step_l_s1 = sl * yday_s1,
-  step_l_s2 = sl * yday_s2,
-  step_l_s3 = sl * yday_s3,
-  step_l_c1 = sl * yday_c1,
-  step_l_c2 = sl * yday_c2,
-  step_l_c3 = sl * yday_c3,
+buffalo_CLR_year_harmonics <- buffalo_CLR_year_harmonics %>% mutate(elev_0 = ifelse(DEM_H_end < 1, 1, DEM_H_end),
+                                                                    elev_log = log(elev_0))
+hist(buffalo_CLR_year_harmonics$DEM_H_end)
+hist(buffalo_CLR_year_harmonics$elev_0)
+hist(buffalo_CLR_year_harmonics$elev_log)
 
-  log_step_l = log_sl,
-  log_step_l_s1 = log_sl * yday_s1,
-  log_step_l_s2 = log_sl * yday_s2,
-  log_step_l_s3 = log_sl * yday_s3,
-  log_step_l_c1 = log_sl * yday_c1,
-  log_step_l_c2 = log_sl * yday_c2,
-  log_step_l_c3 = log_sl * yday_c3,
-
-  cos_turn_a = cos_ta,
-  cos_turn_a_s1 = cos_ta * yday_s1,
-  cos_turn_a_s2 = cos_ta * yday_s2,
-  cos_turn_a_s3 = cos_ta * yday_s3,
-  cos_turn_a_c1 = cos_ta * yday_c1,
-  cos_turn_a_c2 = cos_ta * yday_c2,
-  cos_turn_a_c3 = cos_ta * yday_c3,
-  
-  .keep = "none"
-)
+sum(is.na(buffalo_CLR_year_harmonics$elev_log))
 
 ```
 
@@ -397,90 +129,117 @@ which_buffalo <- 3
 
 buffalo_data <- buffalo_CLR_year_harmonics %>% filter(id == buffalo_ids[which_buffalo]) %>% drop_na(cos_ta)
 
-buffalo_lasso_scaled <- buffalo_data %>% mutate(
+buffalo_lasso_unscaled <- buffalo_data %>% mutate(
   
-  ndvi = scale(ndvi_temporal),
-  ndvi_s1 = scale(ndvi_temporal * yday_s1),
-  ndvi_s2 = scale(ndvi_temporal * yday_s2),
-  ndvi_s3 = scale(ndvi_temporal * yday_s3),
-  ndvi_c1 = scale(ndvi_temporal * yday_c1),
-  ndvi_c2 = scale(ndvi_temporal * yday_c2),
-  ndvi_c3 = scale(ndvi_temporal * yday_c3),
+  ndvi = ndvi_temporal,
+  ndvi_s1 = ndvi_temporal * yday_s1,
+  ndvi_s2 = ndvi_temporal * yday_s2,
+  # ndvi_s3 = ndvi_temporal * yday_s3,
+  # ndvi_s4 = ndvi_temporal * yday_s4,
+  ndvi_c1 = ndvi_temporal * yday_c1,
+  ndvi_c2 = ndvi_temporal * yday_c2,
+  # ndvi_c3 = ndvi_temporal * yday_c3,
+  # ndvi_c4 = ndvi_temporal * yday_c4,
   
-  ndvi_sq = scale(ndvi_temporal ^ 2),
-  ndvi_sq_s1 = scale((ndvi_temporal ^ 2) * yday_s1),
-  ndvi_sq_s2 = scale((ndvi_temporal ^ 2) * yday_s2),
-  ndvi_sq_s3 = scale((ndvi_temporal ^ 2) * yday_s3),
-  ndvi_sq_c1 = scale((ndvi_temporal ^ 2) * yday_c1),
-  ndvi_sq_c2 = scale((ndvi_temporal ^ 2) * yday_c2),
-  ndvi_sq_c3 = scale((ndvi_temporal ^ 2) * yday_c3),
+  ndvi_sq = ndvi_temporal ^ 2,
+  ndvi_sq_s1 = (ndvi_temporal ^ 2) * yday_s1,
+  ndvi_sq_s2 = (ndvi_temporal ^ 2) * yday_s2,
+  # ndvi_sq_s3 = (ndvi_temporal ^ 2) * yday_s3,
+  # ndvi_sq_s4 = (ndvi_temporal ^ 2) * yday_s4,
+  ndvi_sq_c1 = (ndvi_temporal ^ 2) * yday_c1,
+  ndvi_sq_c2 = (ndvi_temporal ^ 2) * yday_c2,
+  # ndvi_sq_c3 = (ndvi_temporal ^ 2) * yday_c3,
+  # ndvi_sq_c4 = (ndvi_temporal ^ 2) * yday_c4,
   
-  canopy = scale(canopy_cover),
-  canopy_s1 = scale(canopy_cover * yday_s1),
-  canopy_s2 = scale(canopy_cover * yday_s2),
-  canopy_s3 = scale(canopy_cover * yday_s3),
-  canopy_c1 = scale(canopy_cover * yday_c1),
-  canopy_c2 = scale(canopy_cover * yday_c2),
-  canopy_c3 = scale(canopy_cover * yday_c3),
+  canopy = canopy_cover,
+  canopy_s1 = canopy_cover * yday_s1,
+  canopy_s2 = canopy_cover * yday_s2,
+  # canopy_s3 = canopy_cover * yday_s3,
+  # canopy_s4 = canopy_cover * yday_s4,
+  canopy_c1 = canopy_cover * yday_c1,
+  canopy_c2 = canopy_cover * yday_c2,
+  # canopy_c3 = canopy_cover * yday_c3,
+  # canopy_c4 = canopy_cover * yday_c4,
   
-  canopy_sq = scale(canopy_cover ^ 2),
-  canopy_sq_s1 = scale((canopy_cover ^ 2) * yday_s1),
-  canopy_sq_s2 = scale((canopy_cover ^ 2) * yday_s2),
-  canopy_sq_s3 = scale((canopy_cover ^ 2) * yday_s3),
-  canopy_sq_c1 = scale((canopy_cover ^ 2) * yday_c1),
-  canopy_sq_c2 = scale((canopy_cover ^ 2) * yday_c2),
-  canopy_sq_c3 = scale((canopy_cover ^ 2) * yday_c3),
+  canopy_sq = canopy_cover ^ 2,
+  canopy_sq_s1 = (canopy_cover ^ 2) * yday_s1,
+  canopy_sq_s2 = (canopy_cover ^ 2) * yday_s2,
+  # canopy_sq_s3 = (canopy_cover ^ 2) * yday_s3,
+  # canopy_sq_s4 = (canopy_cover ^ 2) * yday_s4,
+  canopy_sq_c1 = (canopy_cover ^ 2) * yday_c1,
+  canopy_sq_c2 = (canopy_cover ^ 2) * yday_c2,
+  # canopy_sq_c3 = (canopy_cover ^ 2) * yday_c3,
+  # canopy_sq_c4 = (canopy_cover ^ 2) * yday_c4,
   
-  herby = scale(veg_herby),
-  herby_s1 = scale(veg_herby * yday_s1),
-  herby_s2 = scale(veg_herby * yday_s2),
-  herby_s3 = scale(veg_herby * yday_s3),
-  herby_c1 = scale(veg_herby * yday_c1),
-  herby_c2 = scale(veg_herby * yday_c2),
-  herby_c3 = scale(veg_herby * yday_c3),
+  herby = veg_herby,
+  herby_s1 = veg_herby * yday_s1,
+  herby_s2 = veg_herby * yday_s2,
+  # herby_s3 = veg_herby * yday_s3,
+  # herby_s4 = veg_herby * yday_s4,
+  herby_c1 = veg_herby * yday_c1,
+  herby_c2 = veg_herby * yday_c2,
+  # herby_c3 = veg_herby * yday_c3,
+  # herby_c4 = veg_herby * yday_c4,
   
-  # elev = elev_scaled,
-  # elev_s1 = elev_scaled * yday_s1,
-  # elev_s2 = elev_scaled * yday_s2,
-  # elev_s3 = elev_scaled * yday_s3,
-  # elev_c1 = elev_scaled * yday_c1,
-  # elev_c2 = elev_scaled * yday_c2,
-  # elev_c3 = elev_scaled * yday_c3,
+  elev = elev_log,
+  elev_s1 = elev_log * yday_s1,
+  elev_s2 = elev_log * yday_s2,
+  # elev_s3 = elev_log * yday_s3,
+  elev_c1 = elev_log * yday_c1,
+  elev_c2 = elev_log * yday_c2,
+  # elev_c3 = elev_log * yday_c3,
   # 
-  # elev_2 = elev_2,
-  # elev_2_s1 = elev_2 * yday_s1,
-  # elev_2_s2 = elev_2 * yday_s2,
-  # elev_2_s3 = elev_2 * yday_s3,
-  # elev_2_c1 = elev_2 * yday_c1,
-  # elev_2_c2 = elev_2 * yday_c2,
-  # elev_2_c3 = elev_2 * yday_c3,
+  elev_log_sq = (elev_log ^ 2),
+  elev_log_sq_s1 = (elev_log ^ 2) * yday_s1,
+  elev_log_sq_s2 = (elev_log ^ 2) * yday_s2,
+  # elev_log_sq_s3 = (elev_log ^ 2) * yday_s3,
+  elev_log_sq_c1 = (elev_log ^ 2) * yday_c1,
+  elev_log_sq_c2 = (elev_log ^ 2) * yday_c2,
+  # elev_log_sq_c3 = (elev_log ^ 2) * yday_c3,
   
-  step_l = scale(sl),
-  step_l_s1 = scale(sl * yday_s1),
-  step_l_s2 = scale(sl * yday_s2),
-  step_l_s3 = scale(sl * yday_s3),
-  step_l_c1 = scale(sl * yday_c1),
-  step_l_c2 = scale(sl * yday_c2),
-  step_l_c3 = scale(sl * yday_c3),
+  step_l = sl,
+  step_l_s1 = sl * yday_s1,
+  step_l_s2 = sl * yday_s2,
+  # step_l_s3 = sl * yday_s3,
+  # step_l_s4 = sl * yday_s4,
+  step_l_c1 = sl * yday_c1,
+  step_l_c2 = sl * yday_c2,
+  # step_l_c3 = sl * yday_c3,
+  # step_l_c4 = sl * yday_c4,
 
-  log_step_l = scale(log_sl),
-  log_step_l_s1 = scale(log_sl * yday_s1),
-  log_step_l_s2 = scale(log_sl * yday_s2),
-  log_step_l_s3 = scale(log_sl * yday_s3),
-  log_step_l_c1 = scale(log_sl * yday_c1),
-  log_step_l_c2 = scale(log_sl * yday_c2),
-  log_step_l_c3 = scale(log_sl * yday_c3),
+  log_step_l = log_sl,
+  log_step_l_s1 = log_sl * yday_s1,
+  log_step_l_s2 = log_sl * yday_s2,
+  # log_step_l_s3 = log_sl * yday_s3,
+  # log_step_l_s4 = log_sl * yday_s4,
+  log_step_l_c1 = log_sl * yday_c1,
+  log_step_l_c2 = log_sl * yday_c2,
+  # log_step_l_c3 = log_sl * yday_c3,
+  # log_step_l_c4 = log_sl * yday_c4,
 
-  cos_turn_a = scale(cos_ta),
-  cos_turn_a_s1 = scale(cos_ta * yday_s1),
-  cos_turn_a_s2 = scale(cos_ta * yday_s2),
-  cos_turn_a_s3 = scale(cos_ta * yday_s3),
-  cos_turn_a_c1 = scale(cos_ta * yday_c1),
-  cos_turn_a_c2 = scale(cos_ta * yday_c2),
-  cos_turn_a_c3 = scale(cos_ta * yday_c3),
+  cos_turn_a = cos_ta,
+  cos_turn_a_s1 = cos_ta * yday_s1,
+  cos_turn_a_s2 = cos_ta * yday_s2,
+  # cos_turn_a_s3 = cos_ta * yday_s3,
+  # cos_turn_a_s4 = cos_ta * yday_s4,
+  cos_turn_a_c1 = cos_ta * yday_c1,
+  cos_turn_a_c2 = cos_ta * yday_c2,
+  # cos_turn_a_c3 = cos_ta * yday_c3,
+  # cos_turn_a_c4 = cos_ta * yday_c4,
   
   .keep = "none"
+  
 )
+
+# mean_vals <- apply(buffalo_lasso_unscaled, 2, mean)
+# sd_vals <- apply(buffalo_lasso_unscaled, 2, sd)
+# scaling_attributes <- data.frame(variable = names(buffalo_lasso_unscaled), mean = mean_vals, sd = sd_vals)
+
+buffalo_lasso_scaled <- scale(buffalo_lasso_unscaled)
+
+mean_vals <- attr(buffalo_lasso_scaled, "scaled:center")
+sd_vals <- attr(buffalo_lasso_scaled, "scaled:scale")
+scaling_attributes <- data.frame(variable = names(buffalo_lasso_unscaled), mean = mean_vals, sd = sd_vals)
 
 # generate data
 y = buffalo_data$y
@@ -492,134 +251,34 @@ strata = buffalo_data$step_id
 # par(mfrow = c(1,2))
 # fit the conditional logistic model
 tic()
-cl_buffalo = clogitL1(y=y, x=X, strata, 
+cl_buffalo = clogitL1(y=y, 
+                      x=X, 
+                      strata, 
                        # numLambda = 100,
                        # minLambdaRatio = 1e-8
-                      alpha = 1
-                       )
+                      alpha = 1)
 toc()
 plot(cl_buffalo, logX=TRUE)
 
 # cross validation
 tic()
-clcv_buffalo = cv.clogitL1(cl_buffalo)
+clcv_buffalo = cv.clogitL1(cl_buffalo, numFolds = 4)
 toc()
 plot(clcv_buffalo)
 
-```
-
-Extract scaling attributes
-
-```{r}
-
-# Extract centering and scaling attributes from each column
-column_attributes <- as.data.frame(lapply(buffalo_lasso_scaled, function(x) {
-  center <- attr(x, "scaled:center")  # Extract the centering attribute
-  scale <- attr(x, "scaled:scale")  # Extract the scaling attribute
-  
-  # Return the extracted attributes as a named list
-  data.frame(center = center, scale = scale)
-}))
-
+beep(sound = 2)
 
 ```
 
-With manual scaling
+Just plotting 
 
 ```{r}
 
-buffalo_lasso_unscaled <- buffalo_data %>% mutate(
-  
-  ndvi = ndvi_temporal,
-  ndvi_s1 = ndvi_temporal * yday_s1,
-  ndvi_s2 = ndvi_temporal * yday_s2,
-  ndvi_s3 = ndvi_temporal * yday_s3,
-  ndvi_c1 = ndvi_temporal * yday_c1,
-  ndvi_c2 = ndvi_temporal * yday_c2,
-  ndvi_c3 = ndvi_temporal * yday_c3,
-  
-  ndvi_sq = ndvi_temporal ^ 2,
-  ndvi_sq_s1 = (ndvi_temporal ^ 2) * yday_s1,
-  ndvi_sq_s2 = (ndvi_temporal ^ 2) * yday_s2,
-  ndvi_sq_s3 = (ndvi_temporal ^ 2) * yday_s3,
-  ndvi_sq_c1 = (ndvi_temporal ^ 2) * yday_c1,
-  ndvi_sq_c2 = (ndvi_temporal ^ 2) * yday_c2,
-  ndvi_sq_c3 = (ndvi_temporal ^ 2) * yday_c3,
-  
-  canopy = canopy_scaled,
-  canopy_s1 = canopy_scaled * yday_s1,
-  canopy_s2 = canopy_scaled * yday_s2,
-  canopy_s3 = canopy_scaled * yday_s3,
-  canopy_c1 = canopy_scaled * yday_c1,
-  canopy_c2 = canopy_scaled * yday_c2,
-  canopy_c3 = canopy_scaled * yday_c3,
-  
-  canopy_sq = canopy_scaled ^ 2,
-  canopy_sq_s1 = (canopy_scaled ^ 2) * yday_s1,
-  canopy_sq_s2 = (canopy_scaled ^ 2) * yday_s2,
-  canopy_sq_s3 = (canopy_scaled ^ 2) * yday_s3,
-  canopy_sq_c1 = (canopy_scaled ^ 2) * yday_c1,
-  canopy_sq_c2 = (canopy_scaled ^ 2) * yday_c2,
-  canopy_sq_c3 = (canopy_scaled ^ 2) * yday_c3,
-  
-  herby = veg_herby,
-  herby_s1 = veg_herby * yday_s1,
-  herby_s2 = veg_herby * yday_s2,
-  herby_s3 = veg_herby * yday_s3,
-  herby_c1 = veg_herby * yday_c1,
-  herby_c2 = veg_herby * yday_c2,
-  herby_c3 = veg_herby * yday_c3,
-  
-  # elev = elev_scaled,
-  # elev_s1 = elev_scaled * yday_s1,
-  # elev_s2 = elev_scaled * yday_s2,
-  # elev_s3 = elev_scaled * yday_s3,
-  # elev_c1 = elev_scaled * yday_c1,
-  # elev_c2 = elev_scaled * yday_c2,
-  # elev_c3 = elev_scaled * yday_c3,
-  # 
-  # elev_2 = elev_2,
-  # elev_2_s1 = elev_2 * yday_s1,
-  # elev_2_s2 = elev_2 * yday_s2,
-  # elev_2_s3 = elev_2 * yday_s3,
-  # elev_2_c1 = elev_2 * yday_c1,
-  # elev_2_c2 = elev_2 * yday_c2,
-  # elev_2_c3 = elev_2 * yday_c3,
-  
-  step_l = sl,
-  step_l_s1 = sl * yday_s1,
-  step_l_s2 = sl * yday_s2,
-  step_l_s3 = sl * yday_s3,
-  step_l_c1 = sl * yday_c1,
-  step_l_c2 = sl * yday_c2,
-  step_l_c3 = sl * yday_c3,
+plot(cl_buffalo, logX=TRUE)
+plot(clcv_buffalo)
 
-  log_step_l = log_sl,
-  log_step_l_s1 = log_sl * yday_s1,
-  log_step_l_s2 = log_sl * yday_s2,
-  log_step_l_s3 = log_sl * yday_s3,
-  log_step_l_c1 = log_sl * yday_c1,
-  log_step_l_c2 = log_sl * yday_c2,
-  log_step_l_c3 = log_sl * yday_c3,
-
-  cos_turn_a = cos_ta,
-  cos_turn_a_s1 = cos_ta * yday_s1,
-  cos_turn_a_s2 = cos_ta * yday_s2,
-  cos_turn_a_s3 = cos_ta * yday_s3,
-  cos_turn_a_c1 = cos_ta * yday_c1,
-  cos_turn_a_c2 = cos_ta * yday_c2,
-  cos_turn_a_c3 = cos_ta * yday_c3,
-  
-  .keep = "none"
-  
-)
-
-scale(buffalo_lasso_unscaled)
-
-mean_vals <- apply(buffalo_lasso_unscaled, 2, mean)
-sd_vals <- apply(buffalo_lasso_unscaled, 2, sd)
-
-scaling_attributes <- data.frame(variable = names(buffalo_lasso_unscaled), mean = mean_vals, sd = sd_vals)
+# summary(cl_buffalo)
+summary(clcv_buffalo)
 
 ```
 
@@ -726,18 +385,6 @@ clogit_buffalo
 
 ```
 
-Just plotting 
-
-```{r}
-
-plot(cl_buffalo, logX=TRUE)
-plot(clcv_buffalo)
-
-# summary(cl_buffalo)
-summary(clcv_buffalo)
-
-```
-
 With clogitLasso package
 
 ```{r}
@@ -765,11 +412,11 @@ yday <- seq(0,365,1)
 yday_harmonics_df <- data.frame("linear_term" = rep(1, length(yday)),
                                 "yday_s1" = sin(2*pi*yday/365),
                                 "yday_s2" = sin(4*pi*yday/365),
-                                "yday_s3" = sin(6*pi*yday/365),
+                                # "yday_s3" = sin(6*pi*yday/365),
                                 # "yday_s4" = sin(8*pi*yday/365),
                                 "yday_c1" = cos(2*pi*yday/365),
-                                "yday_c2" = cos(4*pi*yday/365),
-                                "yday_c3" = cos(6*pi*yday/365))
+                                "yday_c2" = cos(4*pi*yday/365))
+                                # "yday_c3" = cos(6*pi*yday/365),
                                 # "yday_c4" = cos(8*pi*yday/365))
 
 # coefs <- attr(X, "dimnames")[[2]]
@@ -788,30 +435,14 @@ coefs_lasso <- coefs_lasso %>% mutate(beta_unpen_nat = (beta_unpen_scl / sd),
                                       beta_CV_nat = (beta_CV_scl / sd),
                                       beta_CV1se_nat = (beta_CV1se_scl / sd)) #  + mean
 
-# coefs[which(coefs == "ndvi_s1")]
-# ndvi_s2_harm <- as.numeric(coef_betas_CV1se[which(coefs == "ndvi_s2")] %*% yday_harmonics_df$yday_s2)
-# plot(yday, ndvi_s2_harm)
-
-# ndvi_harm <- as.numeric(coefs_df %>% dplyr::filter(grepl("ndvi", coefs) & !grepl("sq", coefs)) %>% 
-#                           dplyr::select(beta_CV) %>% unlist() %>% as.numeric() 
-#                         %*% t(as.matrix(yday_harmonics_df)))
-# 
-# ndvi_harm1se <- as.numeric(coefs_df %>% dplyr::filter(grepl("ndvi", coefs) & !grepl("sq", coefs)) %>% 
-#                           dplyr::select(beta_CV1se) %>% unlist() %>% as.numeric() 
-#                         %*% t(as.matrix(yday_harmonics_df)))
-# 
-# plot(yday, ndvi_harm)
-# plot(yday, ndvi_harm1se)
-
 # scaled
-# model_fit <- "beta_CV_scl"
-# model_fit <- "beta_CV1se_scl"
 # model_fit <- "coef_betas_unpen_scl"
-
+model_fit <- "beta_CV_scl"
+# model_fit <- "beta_CV1se_scl"
 # natural scale
-# model_fit <- "beta_CV_nat"
-model_fit <- "beta_CV1se_nat"
 # model_fit <- "coef_betas_unpen_nat"
+# model_fit <- "beta_CV_nat"
+# model_fit <- "beta_CV1se_nat"
 
 harmonics_df <- data.frame("yday" = yday,
                            "ndvi" = as.numeric(coefs_lasso %>% dplyr::filter(grepl("ndvi", coefs) & !grepl("sq", coefs)) %>% 
@@ -961,77 +592,6 @@ monthly_coefs_long %>% filter(!name %in% c("shape", "scale", "kappa")) %>%
 
 # Predictions and cross-validation
 
-Boyce index function
-
-```{r}
-
-ecospat.boyce2 <- function (fit, obs, nclass = 0, window.w = "default", res = 100, 
-  PEplot = TRUE, rm.duplicate = TRUE, method = "spearman") 
-{
-  boycei <- function(interval, obs, fit) {
-    pi <- sum(as.numeric(obs >= interval[1] & obs <= interval[2]))/length(obs)
-    ei <- sum(as.numeric(fit >= interval[1] & fit <= interval[2]))/length(fit)
-    return(round(pi/ei, 10))
-  }
-  if (inherits(fit, "RasterLayer")) {
-    if (is.data.frame(obs) || is.matrix(obs)) {
-      obs <- raster::extract(fit, obs)
-    }
-    fit <- getValues(fit)
-    fit <- fit[!is.na(fit)]
-    obs <- obs[!is.na(obs)]
-  }
-  mini <- min(fit, obs)
-  maxi <- max(fit, obs)
-  if (length(nclass) == 1) {
-    if (nclass == 0) {
-      if (window.w == "default") {
-        window.w <- (max(fit) - min(fit))/10
-      }
-      vec.mov <- seq(from = mini, to = maxi - window.w, 
-        by = (maxi - mini - window.w)/res)
-      vec.mov[res + 1] <- vec.mov[res + 1] + 1
-      interval <- cbind(vec.mov, vec.mov + window.w)
-    }
-    else {
-      vec.mov <- seq(from = mini, to = maxi, by = (maxi - 
-        mini)/nclass)
-      interval <- cbind(vec.mov, c(vec.mov[-1], maxi))
-    }
-  }
-  else {
-    vec.mov <- c(mini, sort(nclass[!nclass > maxi | nclass < 
-      mini]))
-    interval <- cbind(vec.mov, c(vec.mov[-1], maxi))
-  }
-  f <- apply(interval, 1, boycei, obs, fit)
-  to.keep <- which(f != "NaN")
-  f <- f[to.keep]
-  if (length(f) < 2) {
-    b <- NA
-  }
-  else {
-    r <- 1:length(f)
-    if (rm.duplicate == TRUE) {
-      r <- c(1:length(f))[f != c(f[-1], TRUE)]
-    }
-    b <- cor(f[r], vec.mov[to.keep][r], method = method)
-  }
-  HS <- apply(interval, 1, sum)/2
-  if (length(nclass) == 1 & nclass == 0) {
-    HS[length(HS)] <- HS[length(HS)] - 1
-  }
-  HS <- HS[to.keep]
-  if (PEplot == TRUE) {
-    plot(HS, f, xlab = "Habitat suitability", ylab = "Predicted/Expected ratio", 
-      col = "grey", cex = 0.75)
-    points(HS[r], f[r], pch = 19, cex = 0.75)
-  }
-  return(list(F.ratio = f, cor = round(b, 3), HS = HS))
-}
-
-```
-
 ## Naive prediction approach
 
 ```{r}
@@ -1127,7 +687,7 @@ naive_pred_lasso <- naive_pred_stack
 naive_norm_lasso <- naive_norm_stack
 boyce_naive_list_lasso <- boyce_naive_list
 
-# beep(sound = 2)
+beep(sound = 2)
 
 ```
 

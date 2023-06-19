@@ -858,8 +858,8 @@ Import spatial layers (currently in the import spatial layers R file)
 # months <- c(seq(1, 7, 1), seq(8, 12, 1))
 # day <- rep(1, 12)
 # dates <- make_datetime(year = years, month = months, day = day, tz = "Australia/Queensland")
-# 
-# mid_month <- c(16, 47, 75, 106, 136, 167, 197, 228, 259, 289, 320, 350)
+#
+mid_month <- c(1, 47, 75, 106, 136, 167, 197, 228, 259, 289, 320, 366)
 
 # monthly_coefs <- data.frame("date" = dates,
 #                          "ndvi" = yday_coefs_1harm$ndvi[seq(15, 346, 30)],
@@ -912,9 +912,6 @@ print(temp_plot)
 
 ```{r}
 
-# inner loop for each month
-naive_pred_stack <- c()
-naive_norm_stack <- c()
 boyce_naive_list <- vector(mode = "list", length = 12)
 
 # outer loop for the exclusion of each individual
@@ -923,72 +920,81 @@ naive_norm_1harm_list <- vector(mode = "list", length = length(buffalo_ids))
 boyce_naive_list_list <- vector(mode = "list", length = length(buffalo_ids))
 
 for(j in 1:length(buffalo_ids)) {
+  
+  # inner loop for each month
+  naive_pred_stack <- c()
+  naive_norm_stack <- c()
 
-for(i in 1:12) {
+  for(i in 1:12) { # print(monthly_coefs$ndvi_quad[[i]]) }
+    
+    # j = 1
+    # i = 12
+  
+    resources <- c(ndvi_stack_cropped[[which(time(ndvi_stack_cropped) == monthly_coefs_list[[j]]$date[i])]], 
+                   canopy_scaled_cropped,
+                   herby_scaled_cropped)
+    
+    # plot(resources[[1]]) }
+    
+    # ndvi
+    ndvi_lin <- resources[[1]]
+    ndvi_lin_coef <- ndvi_lin * monthly_coefs_list[[j]]$ndvi[[i]]
+    # plot(ndvi_lin)
+    
+    ndvi_quad <- resources[[1]]
+    ndvi_quad_coef <- (ndvi_quad ^ 2) * monthly_coefs_list[[j]]$ndvi_quad[[i]] 
+    # plot(ndvi_quad)
+    
+    ndvi_pred <- ndvi_lin_coef + ndvi_quad_coef
+    # plot(ndvi_pred)
+    
+    # canopy cover 
+    canopy_lin <- resources[[2]]
+    canopy_lin_coef <- canopy_lin * monthly_coefs_list[[j]]$canopy[[i]]
+    # plot(canopy_lin)
+    
+    canopy_quad <- resources[[2]]
+    canopy_quad_coef <- (canopy_quad ^ 2) * monthly_coefs_list[[j]]$canopy_quad[[i]] 
+    # plot(canopy_quad)
+    
+    canopy_pred <- canopy_lin_coef + canopy_quad_coef
+    # plot(canopy_pred)
+    
+    # herby
+    herby_lin <- resources[[3]]
+    herby_pred <- herby_lin * monthly_coefs_list[[j]]$herby[[i]] 
+    # plot(herby_pred)
+    
+    # combining
+    naive_pred <- exp(ndvi_pred + canopy_pred + herby_pred)
+    naive_norm <- naive_pred / global(naive_pred, fun = "sum", na.rm = TRUE)[[1]]
+    
+    plot(naive_norm)
+    # points(as.numeric(buffalo_CLR_year_harmonics %>% filter(y == 1 & month == i & id == buffalo_ids[j]) %>% dplyr::select(x1) %>% unlist()), 
+    #        as.numeric(buffalo_CLR_year_harmonics %>% filter(y == 1 & month == i & id == buffalo_ids[j]) %>% dplyr::select(y1) %>% unlist()))
+    
+    naive_pred_stack <- c(naive_pred_stack, naive_pred)
+    naive_norm_stack <- c(naive_norm_stack, naive_norm)
+    
+    # setting up the buffalo observation data for the relevant month
+    buffalo_obs <- buffalo_CLR_year_harmonics %>% filter(y == 1 & month == i & id == buffalo_ids[j]) %>%
+      transmute(x = x1 - xmin, y = y1 - ymin)
 
-resources <- c(ndvi_stack_cropped[[which(time(ndvi_stack_cropped) == monthly_coefs$date[i])]], 
-               canopy_scaled_cropped,
-               herby_scaled_cropped)
+    naive_raster <- raster(naive_norm)
 
-# ndvi
-ndvi_lin <- resources[[1]]
-ndvi_lin <- ndvi_lin * monthly_coefs$ndvi[[i]]
-# plot(ndvi_lin)
+    boyce_naive_list[[i]] <- ecospat.boyce2(naive_raster, buffalo_obs,
+                                  method = "spearman"
+                                  # method = "pearson",
+                                  # method = "kendall"
+                                  )
 
-ndvi_quad <- resources[[1]]
-ndvi_quad <- (ndvi_quad ^ 2) * monthly_coefs$ndvi_quad[[i]] 
-# plot(ndvi_quad)
-
-ndvi_pred <- ndvi_lin + ndvi_quad
-# plot(ndvi_pred)
-
-# canopy cover 
-canopy_lin <- resources[[2]]
-canopy_lin <- canopy_lin * monthly_coefs$canopy[[i]]
-# plot(canopy_lin)
-
-canopy_quad <- resources[[2]]
-canopy_quad <- (canopy_quad ^ 2) * monthly_coefs$canopy_quad[[i]] 
-# plot(canopy_quad)
-
-canopy_pred <- canopy_lin + canopy_quad
-# plot(canopy_pred)
-
-# herby
-herby_lin <- resources[[3]]
-herby_pred <- herby_lin * monthly_coefs$herby[[i]] 
-# plot(herby_pred)
-
-# combining
-naive_pred <- exp(ndvi_pred + canopy_pred + herby_pred)
-naive_norm <- naive_pred / global(naive_pred, fun = "sum", na.rm = TRUE)[[1]]
-
-plot(naive_norm)
-points(as.numeric(buffalo_CLR_year_harmonics %>% filter(y == 1 & month == i & id == buffalo_ids[j]) %>% dplyr::select(x1) %>% unlist()), 
-       as.numeric(buffalo_CLR_year_harmonics %>% filter(y == 1 & month == i & id == buffalo_ids[j]) %>% dplyr::select(y1) %>% unlist()))
-
-naive_pred_stack <- c(naive_pred_stack, naive_pred)
-naive_norm_stack <- c(naive_norm_stack, naive_norm)
-
-# setting up the buffalo observation data for the relevant month
-buffalo_obs <- buffalo_CLR_year_harmonics %>% filter(y == 1 & month == i & id == buffalo_ids[j]) %>% 
-  transmute(x = x1 - xmin, y = y1 - ymin)
-
-naive_raster <- raster(naive_norm)
-
-boyce_naive_list[[i]] <- ecospat.boyce2(naive_raster, buffalo_obs,
-                              method = "spearman"
-                              # method = "pearson",
-                              # method = "kendall"
-                              )
-
-boyce_naive_list[[i]]
-
-}
-
-naive_pred_1harm_list[[j]] <- naive_pred_stack
-naive_norm_1harm_list[[j]] <- naive_norm_stack
-boyce_naive_list_list[[j]] <- boyce_naive_list
+    # boyce_naive_list[[i]]
+  
+  }
+  
+  naive_pred_1harm_list[[j]] <- naive_pred_stack
+  naive_norm_1harm_list[[j]] <- naive_norm_stack
+  boyce_naive_list_list[[j]] <- boyce_naive_list
 
 }
 
@@ -997,16 +1003,18 @@ boyce_naive_list_list[[j]] <- boyce_naive_list
 
 ```{r}
 
-for(i in 1:12) {
-  plot(naive_pred_stack[[i]])
-}
+# for(j in 1:length(buffalo_ids)) {
+#   for(i in 1:12) {
+#       plot(naive_norm_1harm_list[[j]][[i]])
+#   }
+# }
 
-for(i in 1:12) {
-  # plot(naive_pred_stack[[i]])
-  plot(naive_pred_stack[[i]])
-  points(as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(x1) %>% unlist()), 
-       as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(y1) %>% unlist()))
-}
+# for(i in 1:12) {
+#   # plot(naive_pred_stack[[i]])
+#   plot(naive_pred_stack[[i]])
+#   points(as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(x1) %>% unlist()), 
+#        as.numeric(buffalo_CLR_year %>% filter(y == 1 & month == i) %>% dplyr::select(y1) %>% unlist()))
+# }
 
 ```
 
@@ -1014,14 +1022,26 @@ for(i in 1:12) {
 ```{r}
 
 spearman_cor <- c()
+spearman_cor_list <- vector(mode = "list", length = length(buffalo_ids))
 
-for(i in 1:12) {
-  print(boyce_naive_list[[i]]$cor)
-  spearman_cor[i] <- boyce_naive_list[[i]]$cor
+for(j in 1:length(buffalo_ids)) {
+  
+  for(i in 1:12) {
+    print(boyce_naive_list_list[[j]][[i]]$cor)
+    spearman_cor[i] <- boyce_naive_list_list[[j]][[i]]$cor
+  }
+  
+  spearman_cor_list[[j]] <- spearman_cor
+
 }
 
-mean(spearman_cor)
-sd(spearman_cor)
+for(j in 1:length(buffalo_ids)) {
+  print(mean(spearman_cor_list[[j]]))
+  print(sd(spearman_cor_list[[j]]))
+}
+
+# unlist this and find the overall mean - possibly also plot for each individual/month
+spearman_cor_list
 
 ```
 
@@ -1034,61 +1054,80 @@ BM equation
 
 ```{r}
 
-naive_preds <- rast(naive_pred_stack)
-
+# inner loop
 Beta_Z_z_list  <- vector(mode = "list", length = 12)
 MCBM_preds_list <- vector(mode = "list", length = 12)
+# outer loop
+MCBM_preds_list_list <- vector(mode = "list", length = length(buffalo_ids))
 
+# setting up the function
 n_proposals <- 10
-grid_res <- terra::res(naive_preds)[1]
-rows <- terra::nrow(naive_preds)
-cols <- terra::ncol(naive_preds)
-xmax <- ext(naive_preds[[1]])[2] 
-ymax <- ext(naive_preds[[1]])[4]
+grid_res <- terra::res(naive_pred_stack[[1]])[1]
+rows <- terra::nrow(naive_pred_stack[[1]])
+cols <- terra::ncol(naive_pred_stack[[1]])
+xmax <- ext(naive_pred_stack[[1]][[1]])[2] 
+ymax <- ext(naive_pred_stack[[1]][[1]])[4]
 
-for(month_no in 1:12) {
+for(j in 1:length(buffalo_ids)) {
   
-  # for testing the loop
-  # month_no <- 9
+  naive_preds <- rast(naive_pred_1harm_list[[j]])
 
-tic()
-
-# Create grid of x and y points
-x_points <- rep(1:cols, each = rows)
-y_points <- rep(1:rows, times = cols)
-
-# Generate random angles and lengths
-ta <- runif(n_proposals * length(x_points), min = -pi, max = pi)
-sl <- rgamma(n_proposals * length(x_points), shape = monthly_coefs$shape[month_no], scale = monthly_coefs$scale[month_no])
-
-# Calculate proposal points
-x_proposal <- ((-(grid_res/2) + x_points * grid_res) + sl * sin(ta)) %% xmax
-y_proposal <- ((-(grid_res/2) + y_points * grid_res) + sl * cos(ta)) %% ymax
-
-# exp(beta * Z(x))
-# plot(naive_ud_cropped[[i]])
-
-# exp(beta * Z(z)) * psi(.) dz
-Beta_Z_z_proposed <- terra::extract(naive_preds[[month_no]], cbind(x_proposal, y_proposal))[,1]
-Beta_Z_z_array <- array(Beta_Z_z_proposed, dim = c(rows, cols , n_proposals))
-Beta_Z_z_matrix <- apply(Beta_Z_z_array, 1:2, mean, na.rm = TRUE)
-
-toc()
-
-Beta_Z_z_list[[month_no]] <- flip(terra::setValues(naive_preds[[month_no]], Beta_Z_z_matrix))
-# plot(naive_ud_cropped[[i]])
-# plot(Beta_Z_z_list[[month_no]])
-
-# exp(beta * Z(x)) * exp(beta * Z(z)) * psi(.) dz
-u_x_unnorm <- naive_preds[[month_no]] * Beta_Z_z_list[[month_no]]
-# plot(u_x_unnorm)
-u_x <- u_x_unnorm / as.numeric(terra::global(u_x_unnorm, fun = "sum", na.rm = TRUE))
-names(u_x) <- paste0("MCBM_month_", month_no)
-# plot(u_x)
-
-MCBM_preds_list[[month_no]] <- u_x
+  for(month_no in 1:12) {
+    
+    # for testing the loop
+    # month_no <- 9
+  
+    tic()
+    
+    # Create grid of x and y points
+    x_points <- rep(1:cols, each = rows)
+    y_points <- rep(1:rows, times = cols)
+    
+    # Generate random angles and lengths
+    ta <- runif(n_proposals * length(x_points), min = -pi, max = pi) # should be uniform
+    sl <- rgamma(n_proposals * length(x_points), shape = monthly_coefs$shape[month_no], scale = monthly_coefs$scale[month_no])
+    
+    # Calculate proposal points
+    x_proposal <- ((-(grid_res/2) + x_points * grid_res) + sl * sin(ta)) %% xmax
+    y_proposal <- ((-(grid_res/2) + y_points * grid_res) + sl * cos(ta)) %% ymax
+    
+    # exp(beta * Z(x))
+    # plot(naive_ud_cropped[[i]])
+    
+    # exp(beta * Z(z)) * psi(.) dz
+    Beta_Z_z_proposed <- terra::extract(naive_preds[[month_no]], cbind(x_proposal, y_proposal))[,1]
+    Beta_Z_z_array <- array(Beta_Z_z_proposed, dim = c(rows, cols , n_proposals))
+    Beta_Z_z_matrix <- apply(Beta_Z_z_array, 1:2, mean, na.rm = TRUE)
+    
+    toc()
+    
+    Beta_Z_z_list[[month_no]] <- flip(terra::setValues(naive_preds[[month_no]], Beta_Z_z_matrix))
+    # plot(naive_ud_cropped[[i]])
+    # plot(Beta_Z_z_list[[month_no]])
+    
+    # exp(beta * Z(x)) * exp(beta * Z(z)) * psi(.) dz
+    u_x_unnorm <- naive_preds[[month_no]] * Beta_Z_z_list[[month_no]]
+    # plot(u_x_unnorm)
+    u_x <- u_x_unnorm / as.numeric(terra::global(u_x_unnorm, fun = "sum", na.rm = TRUE))
+    names(u_x) <- paste0("MCBM_month_", month_no)
+    # plot(u_x)
+    
+    MCBM_preds_list[[month_no]] <- u_x
 
 }
+  
+  MCBM_preds_list_list[[j]] <- MCBM_preds_list
+  
+}
+
+save.image("MC-BM_approx_1harm_jacknife_20230609.RData")
+
+```
+
+
+```{r}
+
+for(i in 1:12) plot(MCBM_preds_list_list[[1]][[i]])
 
 ```
 
@@ -1096,32 +1135,32 @@ Plotting
 
 ```{r}
 
-for(month_no in 1:12) {
-
-# exp(beta * Z(x))
-plot(naive_pred_stack[[month_no]])
-plot(naive_pred_stack[[month_no]])
-points(as.numeric(buffalo_CLR_year %>% 
-                    filter(y == 1 & month == month_no) %>% 
-                    dplyr::select(x1) %>% unlist()) - xmin, 
-       as.numeric(buffalo_CLR_year %>% 
-                    filter(y == 1 & month == month_no) %>% 
-                    dplyr::select(y1) %>% unlist()) - ymin)
-
-# exp(beta * Z(z)) * psi(.) dz
-plot(Beta_Z_z_list[[month_no]])
-
-# exp(beta * Z(x)) * exp(beta * Z(z)) * psi(.) dz
-plot(MCBM_preds_list[[month_no]])
-plot(MCBM_preds_list[[month_no]])
-points(as.numeric(buffalo_CLR_year %>%
-                    filter(y == 1 & month == month_no) %>%
-                    dplyr::select(x1) %>% unlist()) - xmin,
-       as.numeric(buffalo_CLR_year %>%
-                    filter(y == 1 & month == month_no) %>%
-                    dplyr::select(y1) %>% unlist()) - ymin)
-
-}
+# for(month_no in 1:12) {
+# 
+# # exp(beta * Z(x))
+# plot(naive_pred_stack[[month_no]])
+# plot(naive_pred_stack[[month_no]])
+# points(as.numeric(buffalo_CLR_year %>% 
+#                     filter(y == 1 & month == month_no) %>% 
+#                     dplyr::select(x1) %>% unlist()) - xmin, 
+#        as.numeric(buffalo_CLR_year %>% 
+#                     filter(y == 1 & month == month_no) %>% 
+#                     dplyr::select(y1) %>% unlist()) - ymin)
+# 
+# # exp(beta * Z(z)) * psi(.) dz
+# plot(Beta_Z_z_list[[month_no]])
+# 
+# # exp(beta * Z(x)) * exp(beta * Z(z)) * psi(.) dz
+# plot(MCBM_preds_list[[month_no]])
+# plot(MCBM_preds_list[[month_no]])
+# points(as.numeric(buffalo_CLR_year %>%
+#                     filter(y == 1 & month == month_no) %>%
+#                     dplyr::select(x1) %>% unlist()) - xmin,
+#        as.numeric(buffalo_CLR_year %>%
+#                     filter(y == 1 & month == month_no) %>%
+#                     dplyr::select(y1) %>% unlist()) - ymin)
+# 
+# }
 
 ```
 
@@ -1130,22 +1169,33 @@ Boyce index
 
 ```{r}
 
+# inner loop
 boyce_naive_list <- vector(mode = "list", length = 12)
 boyce_MCBM_list <- vector(mode = "list", length = 12)
+# outer loop
+boyce_naive_list_list <- vector(mode = "list", length = length(buffalo_ids))
+boyce_MCBM_list_list <- vector(mode = "list", length = length(buffalo_ids))
 
-for(month_no in 1:12) {
+for(j in 1:length(buffalo_ids)) {
 
-buffalo_obs <- buffalo_CLR_year_harmonics %>% 
-  filter(y == 1 & month == month_no) %>% 
-  transmute(x = x1 - xmin, y = y1 - ymin)
-
-naive_raster <- raster(naive_norm_stack[[month_no]])
-boyce_naive_list[[month_no]] <- ecospat.boyce2(naive_raster, buffalo_obs, method = "spearman")
-boyce_naive_list[[month_no]]
-
-MCBM_raster <- raster(MCBM_preds_list[[month_no]])
-boyce_MCBM_list[[month_no]] <- ecospat.boyce2(MCBM_raster, buffalo_obs, method = "spearman")
-boyce_MCBM_list[[month_no]]
+  for(month_no in 1:12) {
+  
+    buffalo_obs <- buffalo_CLR_year_harmonics %>% 
+      filter(y == 1 & month == month_no & id == buffalo_ids[[j]]) %>% 
+      transmute(x = x1 - xmin, y = y1 - ymin)
+    
+    naive_raster <- raster(naive_norm_1harm_list[[j]][[month_no]])
+    boyce_naive_list[[month_no]] <- ecospat.boyce2(naive_raster, buffalo_obs, method = "spearman")
+    boyce_naive_list[[month_no]]
+    
+    MCBM_raster <- raster(MCBM_preds_list_list[[j]][[month_no]])
+    boyce_MCBM_list[[month_no]] <- ecospat.boyce2(MCBM_raster, buffalo_obs, method = "spearman")
+    boyce_MCBM_list[[month_no]]
+  
+  }
+  
+  boyce_naive_list_list[[j]] <- boyce_naive_list
+  boyce_MCBM_list_list[[j]] <- boyce_MCBM_list
 
 }
 
@@ -1154,23 +1204,26 @@ boyce_MCBM_list[[month_no]]
 
 ```{r}
 
-spearman_cor_naive <- c()
-spearman_cor_MCBM <- c()
+spearman_cor_naive_list <- c()
+spearman_cor_MCBM_list <- c()
 
-for(i in 1:12) {
-  
-  print(boyce_naive_list[[i]]$cor)
-  spearman_cor_naive[i] <- boyce_naive_list[[i]]$cor
+for(j in 1:length(buffalo_ids)) {
 
-  print(boyce_MCBM_list[[i]]$cor)
-  spearman_cor_MCBM[i] <- boyce_MCBM_list[[i]]$cor
+  for(i in 1:12) {
+    
+    # print(boyce_naive_list_list[[i]]$cor)
+    spearman_cor_naive[i] <- boyce_naive_list_list[[i]]$cor
+    # print(boyce_MCBM_list_list[[i]]$cor)
+    spearman_cor_MCBM[i] <- boyce_MCBM_list_list[[i]]$cor
+    
+  }
+
+  mean(spearman_cor_naive)
+  sd(spearman_cor_naive)
   
+  mean(spearman_cor_MCBM)
+  sd(spearman_cor_MCBM)
+
 }
-
-mean(spearman_cor_naive)
-sd(spearman_cor_naive)
-
-mean(spearman_cor_MCBM)
-sd(spearman_cor_MCBM)
 
 ```

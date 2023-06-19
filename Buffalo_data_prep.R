@@ -24,10 +24,13 @@ buffalo_CLR <- buffalo_data %>%
          month = month(t1_), 
          hour = hour(t2_rounded),
          ndvi_scaled = scale(ndvi_temporal),
+         ndvi_2 = ndvi_scaled[,1]^2,
          canopy_01 = canopy_cover/100,
          herby_scaled = scale(veg_herby),
          canopy_scaled = scale(canopy_01),
+         canopy_2 = canopy_scaled[,1]^2,
          elev_scaled = scale(DEM_H_end),
+         elev_2 = elev_scaled[,1]^2,
          elev_delta_scaled = scale(elev_delta),
          elev_log_scaled = scale(elev_log),
          slope_scaled = scale(slope_end),
@@ -73,9 +76,9 @@ unique(buffalo_CLR_year$id)
 min(buffalo_CLR_year$t1)
 max(buffalo_CLR_year$t1)
 
-buffalo_CLR_year <- buffalo_CLR_year %>% filter(t1 < "2019-07-25 09:32:42 ACST")
+buffalo_CLR_year_harmonics <- buffalo_CLR_year %>% filter(t1 < "2019-07-25 09:32:42 ACST")
 
-buffalo_CLR_year %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
+buffalo_CLR_year_harmonics %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
   geom_point(alpha = 0.1) +
   scale_y_discrete("Buffalo ID") +
   scale_x_datetime("Date") +
@@ -94,89 +97,6 @@ buffalo_CLR_year %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
 # for(i in 1:length(unique_hours)) {
 #   buffalo_CLR_year$step_aligned[which(buffalo_CLR_year$t1_rounded == hourly_steps$rounded_hours[i])] <- hourly_steps$unique_hours[i]
 # }
-
-
-# Add harmonic terms multiplied by covariates (essentially creating a design matrix)
-
-buffalo_CLR_year_harmonics <- buffalo_CLR_year %>% 
-  mutate(
-    ndvi_2 = ndvi_scaled[,1]^2,
-    canopy_2 = canopy_scaled[,1]^2
-    
-    # ndvi_s1 = ndvi_scaled[,1] * yday_s1,
-    # ndvi_s2 = ndvi_scaled[,1] * yday_s2,
-    # ndvi_s3 = ndvi_scaled[,1] * yday_s3,
-    # ndvi_s4 = ndvi_scaled[,1] * yday_s4,
-    # ndvi_c1 = ndvi_scaled[,1] * yday_c1,
-    # ndvi_c2 = ndvi_scaled[,1] * yday_c2,
-    # ndvi_c3 = ndvi_scaled[,1] * yday_c3,
-    # ndvi_c4 = ndvi_scaled[,1] * yday_c4,
-    
-    
-    # ndvi_2_s1 = ndvi_2 * yday_s1,
-    # ndvi_2_s2 = ndvi_2 * yday_s2,
-    # ndvi_2_s3 = ndvi_2 * yday_s3,
-    # ndvi_2_s4 = ndvi_2 * yday_s4,
-    # ndvi_2_c1 = ndvi_2 * yday_c1,
-    # ndvi_2_c2 = ndvi_2 * yday_c2,
-    # ndvi_2_c3 = ndvi_2 * yday_c3,
-    # ndvi_2_c4 = ndvi_2 * yday_c4,
-    
-    # canopy_s1 = canopy_scaled[,1] * yday_s1,
-    # canopy_s2 = canopy_scaled[,1] * yday_s2,
-    # canopy_s3 = canopy_scaled[,1] * yday_s3,
-    # canopy_s4 = canopy_scaled[,1] * yday_s4,
-    # canopy_c1 = canopy_scaled[,1] * yday_c1,
-    # canopy_c2 = canopy_scaled[,1] * yday_c2,
-    # canopy_c3 = canopy_scaled[,1] * yday_c3,
-    # canopy_c4 = canopy_scaled[,1] * yday_c4,
-    
-    # canopy_2_s1 = canopy_2 * yday_s1,
-    # canopy_2_s2 = canopy_2 * yday_s2,
-    # canopy_2_s3 = canopy_2 * yday_s3,
-    # canopy_2_s4 = canopy_2 * yday_s4,
-    # canopy_2_c1 = canopy_2 * yday_c1,
-    # canopy_2_c2 = canopy_2 * yday_c2,
-    # canopy_2_c3 = canopy_2 * yday_c3,
-    # canopy_2_c4 = canopy_2 * yday_c4,
-    # 
-    # sl_s1 = sl * yday_s1,
-    # sl_s2 = sl * yday_s2,
-    # sl_s3 = sl * yday_s3,
-    # sl_s4 = sl * yday_s4,
-    # sl_c1 = sl * yday_c1,
-    # sl_c2 = sl * yday_c2,
-    # sl_c3 = sl * yday_c3,
-    # sl_c4 = sl * yday_c4,
-    # 
-    # sl_scaled_s1 = sl_scaled * yday_s1,
-    # sl_scaled_s2 = sl_scaled * yday_s2,
-    # sl_scaled_s3 = sl_scaled * yday_s3,
-    # sl_scaled_s4 = sl_scaled * yday_s4,
-    # sl_scaled_c1 = sl_scaled * yday_c1,
-    # sl_scaled_c2 = sl_scaled * yday_c2,
-    # sl_scaled_c3 = sl_scaled * yday_c3,
-    # sl_scaled_c4 = sl_scaled * yday_c4,
-    # 
-    # log_sl_s1 = log_sl * yday_s1,
-    # log_sl_s2 = log_sl * yday_s2,
-    # log_sl_s3 = log_sl * yday_s3,
-    # log_sl_s4 = log_sl * yday_s4,
-    # log_sl_c1 = log_sl * yday_c1,
-    # log_sl_c2 = log_sl * yday_c2,
-    # log_sl_c3 = log_sl * yday_c3,
-    # log_sl_c4 = log_sl * yday_c4,
-    # 
-    # cos_ta_s1 = cos_ta * yday_s1,
-    # cos_ta_s2 = cos_ta * yday_s2,
-    # cos_ta_s3 = cos_ta * yday_s3,
-    # cos_ta_s4 = cos_ta * yday_s4,
-    # cos_ta_c1 = cos_ta * yday_c1,
-    # cos_ta_c2 = cos_ta * yday_c2,
-    # cos_ta_c3 = cos_ta * yday_c3,
-    # cos_ta_c4 = cos_ta * yday_c4
-    
-  )
 
 # Movement parameters from random sampling
 
