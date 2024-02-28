@@ -3,7 +3,13 @@
 library(tidyverse)
 library(lubridate)
 
-buffalo_data <- read_csv(file = "outputs/buffalo_parametric_popn_covs_20230208.csv")
+# buffalo_data_popn <- read_csv(file = "outputs/buffalo_parametric_popn_covs_20230208.csv")
+# buffalo_data <- read_csv(file = "outputs/buffalo_parametric_indv_covs_20230208.csv")
+buffalo_data <- read_csv(file = "outputs/buffalo_parametric_indv_hourly_stepgen_covs_2023-09-26.csv")
+
+# buffalo_data %>% group_by(id) %>% filter(y == 1) %>% summarise(mean_sl = mean(sl_))
+# buffalo_data %>% group_by(id) %>% filter(y == 0) %>% summarise(mean_sl = mean(sl_))
+
 buffalo_data <- buffalo_data %>% mutate(t1_ = lubridate::with_tz(buffalo_data$t1_, tzone = "Australia/Darwin"),
                                         t2_ = lubridate::with_tz(buffalo_data$t2_, tzone = "Australia/Darwin"))
 
@@ -14,26 +20,31 @@ buffalo_CLR <- buffalo_data %>%
          y1 = y1_, y2 = y2_, 
          t1 = t1_, 
          t1_rounded = round_date(buffalo_data$t1_, "hour"), 
-         t2_rounded = round_date(buffalo_data$t2_, "hour"), 
+         hour_t1 = hour(t1_rounded),
          t2 = t2_, 
+         t2_rounded = round_date(buffalo_data$t2_, "hour"), 
+         hour_t2 = hour(t2_rounded),
+         hour = hour_t2,
          yday = yday(t1_),
-         sl = sl_, sl_scaled = scale(sl),
-         log_sl = log_sl_, 
-         ta = ta_, cos_ta = cos_ta_,
          year = year(t1_), 
-         month = month(t1_), 
-         hour = hour(t2_rounded),
-         ndvi_scaled = scale(ndvi_temporal),
-         ndvi_2 = ndvi_scaled[,1]^2,
-         canopy_01 = canopy_cover/100,
-         herby_scaled = scale(veg_herby),
-         canopy_scaled = scale(canopy_01),
-         canopy_2 = canopy_scaled[,1]^2,
-         elev_scaled = scale(DEM_H_end),
-         elev_2 = elev_scaled[,1]^2,
-         elev_delta_scaled = scale(elev_delta),
-         elev_log_scaled = scale(elev_log),
-         slope_scaled = scale(slope_end),
+         month = month(t1_),
+         sl = sl_, 
+         # sl_scaled = scale(sl),
+         log_sl = log(sl_), 
+         ta = ta_, 
+         cos_ta = cos(ta_),
+         # ndvi_scaled = scale(ndvi_temporal),
+         # ndvi_2 = ndvi_scaled[,1]^2,
+         # canopy_01 = canopy_cover/100,
+         # herby_scaled = scale(veg_herby),
+         # canopy_scaled = scale(canopy_01),
+         # canopy_2 = canopy_scaled[,1]^2,
+         # elev_scaled = scale(DEM_H_end),
+         # elev_2 = elev_scaled[,1]^2,
+         # elev_delta_scaled = scale(elev_delta),
+         # elev_0 = ifelse(DEM_H_end < 1, 1, DEM_H_end),
+         # elev_log = log(elev_0),
+         # slope_scaled = scale(slope_end),
          yday_s1 = sin(2*pi*yday/365),
          yday_s2 = sin(4*pi*yday/365),
          yday_s3 = sin(6*pi*yday/365),
@@ -49,9 +60,9 @@ buffalo_CLR <- buffalo_data %>%
          hour_c1 = cos(2*pi*hour/24),
          hour_c2 = cos(4*pi*hour/24),
          hour_c3 = cos(6*pi*hour/24),
-         hour_c4 = cos(8*pi*hour/24)) %>%
-  drop_na(c(ndvi_temporal, veg_herby, canopy_01, sl_)) %>% 
-  dplyr::select(!(burst_:case_))
+         hour_c4 = cos(8*pi*hour/24)) #%>%
+  # drop_na(c(cos_ta, sl)) %>% 
+  # dplyr::select(!(x1_:case_))
 
 
 # Filtering by animals that have more than a year of data
@@ -78,13 +89,16 @@ max(buffalo_CLR_year$t1)
 
 buffalo_CLR_year_harmonics <- buffalo_CLR_year %>% filter(t1 < "2019-07-25 09:32:42 ACST")
 
-buffalo_CLR_year_harmonics %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
-  geom_point(alpha = 0.1) +
-  scale_y_discrete("Buffalo ID") +
-  scale_x_datetime("Date") +
-  scale_colour_viridis_d() +
-  theme_bw() +
-  theme(legend.position = "none")
+# write_csv(buffalo_CLR_year_harmonics, paste0("outputs/buffalo_parametric_popn_covs_harmonics_", Sys.Date(), ".csv"))
+write_csv(buffalo_CLR_year_harmonics, paste0("outputs/buffalo_parametric_indv_hourly_covs_harmonics_", Sys.Date(), ".csv"))
+
+# buffalo_CLR_year_harmonics %>% ggplot(aes(x = t1, y = factor(id), colour = factor(id))) +
+#   geom_point(alpha = 0.1) +
+#   scale_y_discrete("Buffalo ID") +
+#   scale_x_datetime("Date") +
+#   scale_colour_viridis_d() +
+#   theme_bw() +
+#   theme(legend.position = "none")
 
 # Aligning step ids
 
@@ -106,5 +120,5 @@ buffalo_CLR_year_harmonics %>% ggplot(aes(x = t1, y = factor(id), colour = facto
 # vonmises$params$kappa # 0.1848126
 # vonmises$params$mu # 0
 
-movement_parameters <- read_csv("outputs/buffalo_parametric_indv_movement_params_20230208.csv")
-movement_parameters_year <- movement_parameters %>% filter(id %in% buffalo_year_ids)
+# movement_parameters <- read_csv("outputs/buffalo_parametric_indv_movement_params_20230208.csv")
+# movement_parameters_year <- movement_parameters %>% filter(id %in% buffalo_year_ids)

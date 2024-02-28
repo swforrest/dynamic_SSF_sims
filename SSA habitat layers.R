@@ -10,7 +10,7 @@ ndvi_projected <- rast("mapping/cropped rasters/ndvi_GEE_projected_watermask2023
 scaling_mean <- as.numeric(attributes(buffalo_CLR_year_harmonics$ndvi_scaled)[1]) # 0.3125089
 scaling_sd <- as.numeric(attributes(buffalo_CLR_year_harmonics$ndvi_scaled)[2]) # 0.143179 for July 2018
 ndvi_stack_scaled <- (ndvi_projected - scaling_mean) / scaling_sd
-terra::writeRaster(ndvi_stack_scaled, "mapping/ndvi_projected_watermask_scaled_20230612.tif", overwrite = TRUE)
+# terra::writeRaster(ndvi_stack_scaled, "mapping/ndvi_projected_watermask_scaled_20230612.tif", overwrite = TRUE)
 # plot(ndvi_stack_scaled)
 # time_vector <- terra::time(ndvi_projected)
 # terra::time(ndvi_stack_scaled) <- NULL
@@ -103,8 +103,8 @@ ext(canopy_scaled_cropped) <- c(xmin - xmin, xmax - xmin, ymin - ymin, ymax - ym
 ext(herby_scaled_cropped) <- c(xmin - xmin, xmax - xmin, ymin - ymin, ymax - ymin)
 ext(elev_scaled_cropped) <- c(xmin - xmin, xmax - xmin, ymin - ymin, ymax - ymin)
 
-writeRaster(ndvi_stack_cropped, "mapping/cropped rasters/ndvi_projected_watermask_scaled_cropped_20230612.tif")
-writeRaster(canopy_scaled_cropped, "mapping/cropped rasters/canopy_scaled_cropped_by_buffalo_data_20230210.tif")
-writeRaster(herby_scaled_cropped, "mapping/cropped rasters/herby_scaled_by_buffalo_data_cropped_20230210.tif")
-writeRaster(elev_scaled_cropped, "mapping/cropped rasters/elev_scaled_by_buffalo_data_cropped_20230613.tif")
+# writeRaster(ndvi_stack_cropped, "mapping/cropped rasters/ndvi_projected_watermask_scaled_cropped_20230612.tif")
+# writeRaster(canopy_scaled_cropped, "mapping/cropped rasters/canopy_scaled_cropped_by_buffalo_data_20230210.tif")
+# writeRaster(herby_scaled_cropped, "mapping/cropped rasters/herby_scaled_by_buffalo_data_cropped_20230210.tif")
+# writeRaster(elev_scaled_cropped, "mapping/cropped rasters/elev_scaled_by_buffalo_data_cropped_20230613.tif")
 

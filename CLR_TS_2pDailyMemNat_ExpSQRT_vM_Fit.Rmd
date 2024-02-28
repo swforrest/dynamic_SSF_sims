@@ -582,38 +582,63 @@ To estimate an exponential distribution for accept-reject sampling
 
 ```{r}
 
+  # Define your exp_sqrt_pdf function
+# exp_sqrt_pdf <- function(x, lambda_sl, beta2) {
+#   exp((lambda_sl * x) + (beta2 * sqrt(x)))
+# }
+
+# Function to find the difference between the two densities
+# density_difference <- function(lambda, x, lambda_sl, beta2) {
+#   exp_density <- lambda * exp(-lambda * x)
+#   target_density <- exp_sqrt_pdf(x, lambda_sl, beta2) + 0.00001
+#   return(exp_density - target_density)
+# }
+
+
 for(i in 1:24) {
 
-# exp_rate_greater <- hour_coefs_nat_df$lambda_sl[i] + (hour_coefs_nat_df$sl_sqrt[i] / sqrt(max_x))
-# print(exp_rate_greater)
+  # # Example parameters
+  # lambda_sl <- hour_coefs_nat_df$lambda_sl[i]
+  # beta2 <- hour_coefs_nat_df$sl_sqrt[i]
+  # x_value <- max_x  # Example x value where you want the densities to match
+  # 
+  # # Numerical solution
+  # solution <- uniroot(density_difference, 
+  #                     lower = 0.0001, upper = 0.001, 
+  #                     x = x_value, lambda_sl = lambda_sl, beta2 = beta2)
+  # 
+  # # Extract the lambda value
+  # lambda_solution <- solution$root
+  # lambda_solution
+  
+  # i = 20
+  
+  lambda_solution <- 0.00025
+  
+  # Check that dexp is larger than the target density
+  exp_sqrt_pdf(max_x, lambda_sl = hour_coefs_nat_df$lambda_sl[i], beta2 = hour_coefs_nat_df$sl_sqrt[i])
+  dexp(max_x, rate = lambda_solution)
 
-exp_sqrt_pdf(max_x, lambda_sl = hour_coefs_nat_df$lambda_sl[i], beta2 = hour_coefs_nat_df$sl_sqrt[i])
-# exp_rate_greater * exp(max_x * exp_rate_greater)
-
-dexp(max_x, rate = 0.0002175034)
-
-# 0.0003234013 maximum value that can be taken by the exponential distribution at x = 1137
-# at rate of 0.0009
-
+  # find the value of both densities at x = 0
   fx_1 <- (exp_sqrt_pdf(0, lambda_sl = hour_coefs_nat_df$lambda_sl[i], beta2 = hour_coefs_nat_df$sl_sqrt[i]))
-
-  hx_1 <- dexp(0, rate = 0.0002175034)
+  fx_1
+  
+  hx_1 <- dexp(0, rate = lambda_solution)
+  hx_1
 
   cx_1 <- (fx_1 / hx_1)
   print(paste0("Scaling factor is ", cx_1))
-
-  plot(exp_sqrt_pdf(x, lambda_sl = hour_coefs_nat_df$lambda_sl[i], beta2 = hour_coefs_nat_df$sl_sqrt[i]), 
-       type = "l", main = paste0("hour ", i))
   
-  lines(dexp(x, rate = hourly_coefs$rate[i]), col = "blue")
-  lines(cx_1 * dexp(x, rate = 0.0002175034), col = "red")
+  # Check that dexp is larger than the target density
+  ratio_max_x <- cx_1 * dexp(max_x, rate = lambda_solution)/ 
+    exp_sqrt_pdf(max_x, lambda_sl = hour_coefs_nat_df$lambda_sl[i], beta2 = hour_coefs_nat_df$sl_sqrt[i])
+  
+  print(paste0("Ratio between proposal and target at max_x is ", ratio_max_x))
 
-  fx_max_x <- (exp_sqrt_pdf(x, lambda_sl = hour_coefs_nat_df$lambda_sl[i], beta2 = hour_coefs_nat_df$sl_sqrt[i]) / sum(exp_sqrt_pdf(x, lambda_sl = hour_coefs_nat_df$lambda_sl[i], beta2 = hour_coefs_nat_df$sl_sqrt[i])))[max_x]
-
-  hx_max_x <- dexp(x, rate = -exp_rate_greater)[max_x]
-
-  support_max_x <- hx_max_x / fx_max_x
-  print(paste0("Ratio between proposal and target at max_x is ", support_max_x))
+  plot(cx_1 * dexp(x, rate = lambda_solution), type = "l", col = "red")
+  lines(exp_sqrt_pdf(x, lambda_sl = hour_coefs_nat_df$lambda_sl[i], beta2 = hour_coefs_nat_df$sl_sqrt[i]))
+  # lines(dexp(x, rate = hourly_coefs$rate[i]), col = "blue")
+  # lines(cx_1 * dexp(x, rate = lambda_solution), col = "red")
   
 }
 
@@ -680,6 +705,98 @@ solution <- uniroot(density_difference,
                     x = x_value, lambda_sl = lambda_sl, beta2 = beta2)
 
 lambda_solution <- solution$root
+
+```
+
+Accept-reject function with Cauchy distribution
+
+```{r}
+
+pdf <- function(x, lambda_sl, beta2) {
+  exp((lambda_sl * x) + (beta2 * sqrt(x)))
+}
+
+# Accept-reject sampling using Cauchy distribution
+cauchy_accept_reject <- function(pdf, lambda_sl, beta2, x0, gamma, n, cauchy_scaling) {
+  samples <- numeric(0)
+  
+  while (length(samples) < n) {
+    x_proposal <- rcauchy(1, location = x0, scale = gamma)
+    if (x_proposal <= 0) next  # Skip non-positive values
+    if (x_proposal > max_x) next  # Skip values greater than the 99th quantile of step lengths
+    accept_prob <- pdf(x_proposal, lambda_sl, beta2) / (cauchy_scaling * dcauchy(x_proposal, location = x0, scale = gamma))
+    
+    if (runif(1) < accept_prob) {
+      samples <- c(samples, x_proposal)
+    }
+  }
+  
+  return(samples)
+}
+
+# Density plot function
+plot_densities <- function(lambda_sl, beta2, x0, gamma, max_x, cauchy_scaling) {
+  x_values <- seq(0, max_x, length.out = 1000)
+  target_densities <- sapply(x_values, function(x) exp_sqrt_pdf(x, lambda_sl, beta2))
+  cauchy_densities <- cauchy_scaling * dcauchy(x_values, location = x0, scale = gamma)
+
+  data <- data.frame(x = x_values, 
+                     Target = target_densities / sum(target_densities), 
+                     Cauchy = cauchy_densities ) # / sum(cauchy_densities))
+                     # Target = target_densities, 
+                     # Cauchy = cauchy_densities) 
+
+  ggplot(data) +
+    geom_line(aes(x = x, y = Target, colour = "Target")) +
+    geom_line(aes(x = x, y = Cauchy, colour = "Cauchy")) +
+    scale_colour_manual(values = c("Target" = "blue", "Cauchy" = "red")) +
+    ggtitle(paste0("Density Comparison - Hour ", i)) +
+    theme_bw()
+}
+
+# Sample plot function
+plot_samples <- function(samples) {
+  ggplot(data.frame(x = samples), aes(x)) +
+    geom_histogram(binwidth = 5, fill = "skyblue", color = "black") +
+    ggtitle(paste0("Histogram of Sampled Values - Hour ", i)) +
+    theme_bw()
+}
+
+```
+
+Running the accept-reject function
+
+```{r}
+
+for(i in 1:24) {
+
+  # Example usage
+  lambda_sl <- hour_coefs_nat_df$lambda_sl[i]
+  beta2 <- hour_coefs_nat_df$sl_sqrt[i]
+  x0 <- 2
+  gamma <- 10
+  n_samples <- 1e4
+  max_x <- max_x  # Adjust as needed
+  cauchy_scaling <- pdf(max_x, lambda_sl, beta2) / dcauchy(max_x, location = x0, scale = gamma)
+  
+  tic()
+  # Generate samples
+  samples <- cauchy_accept_reject(exp_sqrt_pdf, lambda_sl, beta2, x0, gamma, n_samples, cauchy_scaling)
+  toc()
+  
+  # Plot densities and samples
+  # png(paste0("outputs/plots/accept_reject_cauchy/cauchy_target_densities_", i, ".png"))
+  print(plot_densities(lambda_sl, beta2, x0, gamma, max_x, cauchy_scaling))
+  # dev.off()
+  
+  # png(paste0("outputs/plots/accept_reject_cauchy/histogram_samples_", i, ".png"))
+  print(plot_samples(samples))
+  # dev.off()
+  
+  print(paste0("Mean of samples is ", mean(samples)))
+  print(paste0("Mean of samples is ", median(samples)))
+
+}
 
 ```
 

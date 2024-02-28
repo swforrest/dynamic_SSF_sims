@@ -30,6 +30,21 @@ walk(packages, require, character.only = T)
 
 ```
 
+Removing negative values from elevation
+
+```{r}
+
+buffalo_CLR_year_harmonics <- buffalo_CLR_year_harmonics %>% mutate(elev_0 = ifelse(DEM_H_end < 1, 1, DEM_H_end),
+                                                                    elev_log = log(elev_0),
+                                                                    elev_log_scaled = scale(elev_log))
+# hist(buffalo_CLR_year_harmonics$DEM_H_end)
+# hist(buffalo_CLR_year_harmonics$elev_0)
+# hist(buffalo_CLR_year_harmonics$elev_log)
+
+sum(is.na(buffalo_CLR_year_harmonics$elev_log))
+
+```
+
 With 2 pairs of harmonics and quadratics
 
 ```{r two harmonics}
@@ -69,6 +84,30 @@ formula_twostep <- y ~
   hour_c1:canopy_2 +
   hour_c2:canopy_2 +
   # hour_c3:canopy_2 +
+  
+  herby_scaled +
+  hour_s1:herby_scaled +
+  hour_s2:herby_scaled +
+  # hour_s3:herby_scaled +
+  hour_c1:herby_scaled +
+  hour_c2:herby_scaled +
+  # hour_c3:herby_scaled +
+  
+  # elev_log_scaled +
+  # hour_s1:elev_log_scaled +
+  # hour_s2:elev_log_scaled +
+  # # hour_s3:elev_log_scaled +
+  # hour_c1:elev_log_scaled +
+  # hour_c2:elev_log_scaled +
+  # # hour_c3:elev_log_scaled +
+  # 
+  # canopy_2 +
+  # hour_s1:canopy_2 +
+  # hour_s2:canopy_2 +
+  # # hour_s3:canopy_2 +
+  # hour_c1:canopy_2 +
+  # hour_c2:canopy_2 +
+  # # hour_c3:canopy_2 +
   
   sl +
   hour_s1:sl +
@@ -222,16 +261,17 @@ Fitting the model
 
 ```{r twostep model fit}
 
-month_no <- 3
-buffalo_model_data <- buffalo_CLR_year_harmonics %>% dplyr::filter(month == month_no)
+# month_no <- 3
+# buffalo_model_data <- buffalo_CLR_year_harmonics %>% dplyr::filter(month == month_no)
 
 tic()
 model_twostep <- Ts.estim(formula = formula_twostep,
-         data = buffalo_model_data,
-         # random = , # default = all covariates
-         all.m.1 = TRUE,
-         D = "UN(1)",
-         itermax = 10000) # default = 2000
+                          data = buffalo_CLR_year_harmonics,
+                           # data = buffalo_model_data,
+                           # random = , # default = all covariates
+                           all.m.1 = TRUE,
+                           D = "UN(1)",
+                           itermax = 10000) # default = 2000
 toc()
 
 # model_twostep_2harms <- model_twostep
@@ -936,6 +976,7 @@ ggplot() +
 
 ```
 
+
 ```{r}
 
 x <- seq(-5,5,0.1)
@@ -1127,8 +1168,8 @@ Naive approach
 
 ```{r}
 
-# ndvi_mean_wet <- terra::mean(ndvi_stack_cropped[[12 + months_wet]])
-# plot(ndvi_mean_wet)
+ndvi_mean_wet <- terra::mean(ndvi_stack_cropped[[12 + months_wet]])
+plot(ndvi_mean_wet)
 
 # naive_pred_50m <- terra::aggregate(naive_pred)
 # naive_raster <- raster(naive_pred_50m)
@@ -1237,7 +1278,7 @@ naive_norm_daily_2harms_quads_w_herby_wet <- naive_pred_norm_stack
 
 boyce_naive_raster_daily_2harms_quads_w_herby_wet <- boyce_naive_list
 
-terra::writeRaster(rast(naive_pred_stack), "mapping/naive_pred_stack_unnorm_daily_2harms_ndvi2_canopy2_herby_wet_20230525.tif")
+# terra::writeRaster(rast(naive_pred_stack), "mapping/naive_pred_stack_unnorm_daily_2harms_ndvi2_canopy2_herby_wet_20230525.tif")
 
 ```
 
