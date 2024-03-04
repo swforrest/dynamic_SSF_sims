@@ -1,7 +1,9 @@
 # Temporal-step-selection-analyses
 
-Adding temporal dynamics to step selection analyses for the purpose of generating trajectories. I am applying harmonic terms (and how many to use), and testing several model fitting approaches, before generating temporally dynamic trajectories.
+The code in this repository accompanies a paper titled 'Simulating animal movement trajectories from temporally dynamic step selection functions', which is due to be submitted soon.
 
-This is currently a work in progress and not yet published.
+In this paper we used harmonic terms to estimate temporally dynamic coefficients from step selection models, from which we simulated animal movement trajectories. We interacted the movement, habitat selection and memory parameters with the harmonic terms, resulting in temporal dynamism for all these processes.
 
-If you are interested in hearing more about the approaches or using the code, please contact me.
+The files are numbered by the order of analyses, and some output files that are used by the succeeding scripts.
+
+For more details, please get in contact.
