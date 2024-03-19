@@ -890,9 +890,36 @@ Similar to the approach of @Abrahms2017-dp and @Kays2023-zi, we can use PCA to r
 # and some that are covered by another summary, such as the monthly overlap with
 # volume of intersection, as this information is largely contained in the Bhattacharyya's
 # affinity overlap
+# summaries_all_pca <- summaries_all %>%
+#   dplyr::select(-traj, -id, -data, -sim, -residence_time_log, 
+#                 -msd_log, -ba_overlap, -hr_monthly_overlap_vi) %>% 
+#   na.omit() %>% 
+#   prcomp(center = TRUE, scale. = TRUE)
+
 summaries_all_pca <- summaries_all %>%
-  dplyr::select(-traj, -id, -data, -sim, -residence_time_log, 
-                -msd_log, -ba_overlap, -hr_monthly_overlap_vi) %>% 
+  dplyr::select(step_length_median,
+                step_length_mean,
+                gamma_shape,
+                gamma_scale,
+                vm_kappa,
+                sinuosity,
+                straightness,
+                intensity_use,
+                tac,
+                residence_time,
+                tot_dist,
+                hr_area_50,
+                hr_area_95,
+                hr_monthly_overlap_ba,
+                ndvi_mean,
+                ndvi_sd,
+                canopy_mean,
+                canopy_sd,
+                herby_mean,
+                herby_sd,
+                slope_mean,
+                slope_sd
+                ) %>% 
   na.omit() %>% 
   prcomp(center = TRUE, scale. = TRUE)
 
@@ -900,8 +927,9 @@ summaries_all_pca <- summaries_all %>%
 
 #PCA diagnostics
 summary(summaries_all_pca)
-# biplot(summaries_all_pca)
-# screeplot(summaries_all_pca, type = "l")
+summaries_all_pca
+biplot(summaries_all_pca)
+screeplot(summaries_all_pca, type = "l")
 
 # proportion of variance explained
 prop_var <- summaries_all_pca$sdev^2 / sum(summaries_all_pca$sdev^2)
@@ -979,7 +1007,7 @@ pca_plot <- ggplot() +
   xlab(paste0("PC1: ", round(prop_var[1]*100, 1), "% expl. variance")) +
   ylab(paste0("PC2: ", round(prop_var[2]*100, 1), "% expl. variance")) +
   scale_color_manual("Data", values = colors) +
-  scale_y_continuous(limits = c(-7.5, 5)) +
+  # scale_y_continuous(limits = c(-5.5, 5.5)) +
   geom_hline(yintercept = 0, linetype = "dashed") +
   geom_vline(xintercept = 0, linetype = "dashed") +
   theme(legend.position = "bottom")

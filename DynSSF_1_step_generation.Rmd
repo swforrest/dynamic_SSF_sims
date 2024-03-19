@@ -28,7 +28,7 @@ walk(packages, require, character.only = T)
 
 ## Import data and clean
 
-```{r import data, echo=FALSE, message=FALSE}
+```{r import data, message=FALSE}
 
 buffalo <- read_csv("data/buffalo.csv")
 
