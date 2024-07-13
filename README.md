@@ -11,6 +11,9 @@ The `data` folder contains the data used in the first script to generate random 
 The details of the inputs and outputs of each script are below. Creating a project or setting a working directory in the `DynSSF` folder should ensure that all data and files are read in without having to change path names in the scripts.
 
 ## Animations of hourly distributions ##
+
+The observed buffalo locations for that hour are shown as the white locations. There are locations from several individual buffalo in this landscape extent.
+
 ![](https://github.com/swforrest/dynamic_SSF_sims/blob/main/sim_preds_0p_hourly.gif)
 ![](https://github.com/swforrest/dynamic_SSF_sims/blob/main/sim_preds_1p_hourly.gif)
 ![](https://github.com/swforrest/dynamic_SSF_sims/blob/main/sim_preds_2p_hourly.gif)
