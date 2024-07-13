@@ -1,6 +1,6 @@
 # Simulating animal movement trajectories from temporally dynamic step selection functions
 
-The code, data and R objects in this repository accompany a paper titled 'Simulating animal movement trajectories from temporally dynamic step selection functions'.
+The code, data and R objects in this repository accompany a paper titled 'Predicting fine-scale distributions and emergent spatiotemporal patterns from temporally dynamic step selection simulations'.
 
 In this paper we used harmonic terms to estimate temporally dynamic coefficients from step selection models, from which we simulated animal movement trajectories. We interacted the movement, habitat selection and memory parameters with the harmonic terms, resulting in temporal dynamism for all these processes.
 
@@ -9,6 +9,10 @@ The R Markdown and accompanying knitted html files are numbered by the order of 
 The `data` folder contains the data used in the first script to generate random steps and sample from the covariates (which are included in the `mapping` folder). All the code should run with just these two sets of inputs (buffalo.csv for GPS data and rasters of spatial covariates in the mapping folder), although I have also included the intermediate outputs in the `outputs` folder that are produced by scripts and are used as inputs in the succeeding scripts. 
 
 The details of the inputs and outputs of each script are below. Creating a project or setting a working directory in the `DynSSF` folder should ensure that all data and files are read in without having to change path names in the scripts.
+
+## Animations of hourly distributions ##
+
+
 
 
 ## Walkthrough script - DynSSF_Walkthrough_Harmonics_and_selection_surfaces.Rmd ##
