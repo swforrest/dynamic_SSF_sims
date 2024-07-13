@@ -1,8 +1,8 @@
 # Simulating animal movement trajectories from temporally dynamic step selection functions
 
-The code, data and R objects in this repository accompany a paper titled 'Predicting fine-scale distributions and emergent spatiotemporal patterns from temporally dynamic step selection simulations'.
+The code, data and R objects in this repository accompany a paper titled 'Predicting fine-scale distributions and emergent spatiotemporal patterns from temporally dynamic step selection simulations', which is currently available as a preprint at: [https://www.biorxiv.org/content/10.1101/2024.03.19.585696v4](https://www.biorxiv.org/content/10.1101/2024.03.19.585696v4).
 
-In this paper we used harmonic terms to estimate temporally dynamic coefficients from step selection models, from which we simulated animal movement trajectories. We interacted the movement, habitat selection and memory parameters with the harmonic terms, resulting in temporal dynamism for all these processes.
+In this paper we used harmonic terms to estimate temporally dynamic coefficients from step selection models, from which we simulated animal movement trajectories. The simulations with temporal dynamics gave informative hourly predictions of expected buffalo distribution (animations below), and also gave more accurate long-term predictions. 
 
 The R Markdown and accompanying knitted html files are numbered by the order of analysis, with an additional 'walkthrough' to build some intuition around fitting models with harmonic terms.
 
@@ -12,6 +12,9 @@ The details of the inputs and outputs of each script are below. Creating a proje
 
 ## Animations of hourly distributions ##
 ![](https://github.com/swforrest/dynamic_SSF_sims/blob/main/sim_preds_0p_hourly.gif)
+![](https://github.com/swforrest/dynamic_SSF_sims/blob/main/sim_preds_1p_hourly.gif)
+![](https://github.com/swforrest/dynamic_SSF_sims/blob/main/sim_preds_2p_hourly.gif)
+![](https://github.com/swforrest/dynamic_SSF_sims/blob/main/sim_preds_3p_hourly.gif)
 
 
 ## Walkthrough script - DynSSF_Walkthrough_Harmonics_and_selection_surfaces.Rmd ##
